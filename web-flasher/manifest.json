@@ -1,0 +1,29 @@
+{
+  "name": "CYD of the Dead",
+  "version": "latest",
+  "new_install_prompt_erase": true,
+  "new_install_improv_wait_time": 0,
+  "builds": [
+    {
+      "chipFamily": "ESP32",
+      "parts": [
+        {
+          "path": "firmware/bootloader.bin",
+          "offset": 4096
+        },
+        {
+          "path": "firmware/partitions.bin",
+          "offset": 32768
+        },
+        {
+          "path": "firmware/boot_app0.bin",
+          "offset": 57344
+        },
+        {
+          "path": "firmware/firmware.bin",
+          "offset": 65536
+        }
+      ]
+    }
+  ]
+}

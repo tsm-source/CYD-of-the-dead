@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Install CYD of the Dead on an ESP32 Cheap Yellow Display from your browser.">
+    <title>Install CYD of the Dead</title>
+    <script
+      type="module"
+      src="https://unpkg.com/esp-web-tools@10/dist/web/install-button.js?module"
+    ></script>
+    <style>
+      :root {
+        color-scheme: dark;
+        font-family: system-ui, sans-serif;
+        background: #111827;
+        color: #f9fafb;
+      }
+
+      body {
+        box-sizing: border-box;
+        display: grid;
+        min-height: 100vh;
+        margin: 0;
+        padding: 2rem;
+        place-items: center;
+      }
+
+      main {
+        width: min(100%, 38rem);
+        padding: 2rem;
+        border: 1px solid #4b5563;
+        border-radius: 1rem;
+        background: #1f2937;
+        box-shadow: 0 1rem 3rem #0006;
+      }
+
+      h1 {
+        margin-top: 0;
+        color: #fb923c;
+      }
+
+      p,
+      li {
+        line-height: 1.6;
+      }
+
+      .install {
+        margin: 1.5rem 0;
+        text-align: center;
+      }
+
+      a {
+        color: #7dd3fc;
+      }
+
+      .warning {
+        padding: 1rem;
+        border-left: 4px solid #fbbf24;
+        background: #111827;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>CYD of the Dead</h1>
+      <p>Install the game on a compatible ESP32 Cheap Yellow Display (CYD) directly from your browser.</p>
+      <ol>
+        <li>Use a desktop version of Chrome, Edge, or another browser that supports Web Serial.</li>
+        <li>Connect the CYD with a USB data cable.</li>
+        <li>Press Install, choose the board's serial port, and approve the connection.</li>
+      </ol>
+      <p class="install">
+        <esp-web-install-button manifest="./manifest.json"></esp-web-install-button>
+      </p>
+      <p class="warning">
+        On a new installation, the flasher may offer to erase the device first.
+        Erasing removes saved game preferences such as the high score, volume,
+        and touch calibration. Keep a copy of anything you need before erasing.
+      </p>
+      <p>
+        For connection or board-specific help, see the
+        <a href="https://github.com/miquatsm-source/CYD-of-the-dead">project repository</a>.
+      </p>
+    </main>
+  </body>
+</html>

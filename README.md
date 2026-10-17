@@ -1,5 +1,7 @@
 # CYD of the Dead
 
+> **AI disclosure:** The text of this README was created with AI assistance.
+
 A small touchscreen rail-shooter prototype for the ESP32-based CYD (Cheap
 Yellow Display). Zombie officers emerge in five original scenes—an alley,
 police station, ballroom, backyard, and tavern—and approach in three lanes.
@@ -24,8 +26,11 @@ score.
 - Up to five zombies can appear at once. Each zombie is randomly assigned one
   of three distinct shambling, lurching, or reaching animations. Up to three
   peaceful civilians or animals can be on screen at once.
-- Choose Easy (10 lives) or Hard (5 lives) in the title menu. Hard mode doubles
-  the police-zombie share of spawns, and officers can shoot after one second.
+- Choose Easy (15 lives), Medium (10 lives), or Hard (5 lives) in the title
+  menu. Medium retains the former Easy settings. Easy zombies advance more
+  slowly, spawn less often, and leave the boss's chest weak point open longer.
+  Hard mode doubles the police-zombie share of spawns, and officers can shoot
+  after one second.
 - Brutes take five body hits and move slowly; runners move quickly, while
   peekers briefly watch from windows before moving into a lane.
 - Every scene ends with a boss. Its chest weak point opens and closes; land
@@ -74,6 +79,20 @@ score.
 - The Game Over screen features a celebrating zombie officer animated on the
   right side of the display.
 
+## Install from a browser
+
+After GitHub Pages has been enabled for this repository with **Settings >
+Pages > Build and deployment > GitHub Actions**, the latest firmware can be
+installed from
+[the web flasher](https://miquatsm-source.github.io/CYD-of-the-dead/).
+Every push to `main` builds and publishes the web flasher and its firmware
+files automatically.
+
+Use a desktop browser that supports Web Serial, such as Chrome or Edge, and a
+USB data cable. The browser asks you to select the CYD's serial port. On a new
+installation, the flasher may offer to erase the device; erasing also removes
+the saved high score, volume, and touchscreen calibration.
+
 ## Hardware
 
 Configured for an ESP32 CYD with a 2.8-inch, 240 x 320 ST7789 display, an
@@ -89,7 +108,7 @@ particular board before flashing.
 2. Clone this repository and open its folder in VS Code:
 
    ```sh
-   git clone https://github.com/miquatsm-source/CYD-of-the-death.git
+   git clone https://github.com/miquatsm-source/CYD-of-the-dead.git
    ```
 
 3. Connect the CYD over USB with a data-capable cable.

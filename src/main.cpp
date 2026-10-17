@@ -17,6 +17,7 @@ constexpr uint8_t MAX_HIT_EFFECTS = 4;
 constexpr uint8_t MAX_CIVILIANS = 3;
 constexpr uint8_t KILLS_PER_WAVE = 10;
 constexpr uint8_t EASY_STARTING_LIVES = 10;
+constexpr uint8_t VERY_EASY_STARTING_LIVES = 15;
 constexpr uint8_t HARD_STARTING_LIVES = 5;
 constexpr uint8_t MAGAZINE_SIZE = 10;
 constexpr uint8_t LEVEL_COUNT = 5;
@@ -32,6 +33,7 @@ constexpr uint16_t ZOMBIE_REACH_PLAYER_MS = 8500;
 constexpr uint16_t BOSS_REACH_PLAYER_MS = 18000;
 constexpr uint16_t BOSS_WEAKPOINT_CYCLE_MS = 2600;
 constexpr uint16_t BOSS_WEAKPOINT_OPEN_MS = 1300;
+constexpr uint16_t EASY_BOSS_WEAKPOINT_OPEN_MS = 1950;
 constexpr uint8_t BOSS_HEAD_HITS = 3;
 constexpr uint8_t BOSS_TORSO_HITS = 5;
 constexpr uint16_t RUNNER_REACH_PLAYER_MS = 6200;
@@ -62,7 +64,7 @@ enum class ZombieKind : uint8_t {
   Boss
 };
 enum class ZombieAnimation : uint8_t { Shamble, Lurch, Reach };
-enum class Difficulty : uint8_t { Easy, Hard };
+enum class Difficulty : uint8_t { Easy = 0, Hard = 1, Medium = 2 };
 enum class WaveObjective : uint8_t { Headshots, Combo, Eliminations };
 
 struct Zombie {
@@ -678,8 +680,34 @@ uint8_t currentLevel() {
 }
 
 uint8_t startingLives() {
-  return difficulty == Difficulty::Hard ? HARD_STARTING_LIVES
-                                        : EASY_STARTING_LIVES;
+  switch (difficulty) {
+    case Difficulty::Easy:
+      return VERY_EASY_STARTING_LIVES;
+    case Difficulty::Hard:
+      return HARD_STARTING_LIVES;
+    case Difficulty::Medium:
+      return EASY_STARTING_LIVES;
+  }
+  return VERY_EASY_STARTING_LIVES;
+}
+
+const char *difficultyName() {
+  switch (difficulty) {
+    case Difficulty::Easy:
+      return "EASY";
+    case Difficulty::Medium:
+      return "MEDIUM";
+    case Difficulty::Hard:
+      return "HARD";
+  }
+  return "EASY";
+}
+
+bool bossWeakpointIsOpen(uint32_t age) {
+  const uint16_t openDuration =
+      difficulty == Difficulty::Easy ? EASY_BOSS_WEAKPOINT_OPEN_MS
+                                     : BOSS_WEAKPOINT_OPEN_MS;
+  return (age % BOSS_WEAKPOINT_CYCLE_MS) < openDuration;
 }
 
 uint8_t zombieTorsoHealth(ZombieKind kind) {
@@ -694,16 +722,22 @@ uint8_t zombieTorsoHealth(ZombieKind kind) {
 }
 
 uint16_t zombieReachTime(ZombieKind kind) {
+  uint16_t reachTime;
   switch (kind) {
     case ZombieKind::Runner:
-      return RUNNER_REACH_PLAYER_MS;
+      reachTime = RUNNER_REACH_PLAYER_MS;
+      break;
     case ZombieKind::Brute:
-      return BRUTE_REACH_PLAYER_MS;
+      reachTime = BRUTE_REACH_PLAYER_MS;
+      break;
     case ZombieKind::Boss:
-      return BOSS_REACH_PLAYER_MS;
+      reachTime = BOSS_REACH_PLAYER_MS;
+      break;
     default:
-      return ZOMBIE_REACH_PLAYER_MS;
+      reachTime = ZOMBIE_REACH_PLAYER_MS;
+      break;
   }
+  return difficulty == Difficulty::Easy ? reachTime * 3 / 2 : reachTime;
 }
 
 WaveObjective currentObjective() {
@@ -1615,10 +1649,8 @@ void drawMenu(uint32_t now) {
   frameBuffer.setTextSize(1);
   frameBuffer.setCursor(121, 164);
   frameBuffer.print("TAP TO CHANGE");
-  frameBuffer.setCursor(121, 175);
-  frameBuffer.printf("%s - %u LIVES",
-                     difficulty == Difficulty::Easy ? "EASY" : "HARD",
-                     startingLives());
+  frameBuffer.setCursor(109, 175);
+  frameBuffer.printf("%s - %u LIVES", difficultyName(), startingLives());
 
   frameBuffer.drawRoundRect(99, 195, 122, 31, 8, TFT_WHITE);
   frameBuffer.setTextColor(TFT_ORANGE);
@@ -1696,8 +1728,7 @@ void drawZombie(const Zombie &zombie, uint32_t now) {
   if (zombie.kind == ZombieKind::Boss) {
     frameBuffer.drawRoundRect(x - torsoWidth / 2, torsoTop, torsoWidth,
                               radius + 9, 5, badgeGold);
-    const bool weakPointOpen =
-        (age % BOSS_WEAKPOINT_CYCLE_MS) < BOSS_WEAKPOINT_OPEN_MS;
+    const bool weakPointOpen = bossWeakpointIsOpen(age);
     const uint16_t weakPointColor =
         weakPointOpen ? TFT_YELLOW : 0x8000;
     frameBuffer.fillCircle(x, y + 1, 9, weakPointColor);
@@ -2492,8 +2523,11 @@ void updateZombies(uint32_t now) {
     }
   }
 
-  const uint32_t spawnInterval =
+  const uint32_t baseSpawnInterval =
       max<uint32_t>(850, 1900U - min<uint32_t>(wave * 70U, 850U));
+  const uint32_t spawnInterval =
+      difficulty == Difficulty::Easy ? baseSpawnInterval * 3 / 2
+                                     : baseSpawnInterval;
   if (sceneKills == LEVEL_HIT_THRESHOLD - 1) {
     if (!bossEncounterSpawned) {
       spawnBoss(now);
@@ -2659,8 +2693,7 @@ void shootAt(int16_t x, int16_t y) {
         return;
       }
     } else if (zombie.kind == ZombieKind::Boss) {
-      const bool weakPointOpen =
-          (age % BOSS_WEAKPOINT_CYCLE_MS) < BOSS_WEAKPOINT_OPEN_MS;
+      const bool weakPointOpen = bossWeakpointIsOpen(age);
       const int16_t weakDx = x - static_cast<int16_t>(zombie.x);
       const int16_t weakDy = y - (static_cast<int16_t>(zombie.y) + 1);
       if (!weakPointOpen || weakDx * weakDx + weakDy * weakDy > 11 * 11) {
@@ -2775,10 +2808,20 @@ void handleTouch() {
         playTone(988, 55);
         staticScreenDirty = true;
       } else if (x >= 99 && x <= 221 && y >= 161 && y <= 188) {
-        difficulty = difficulty == Difficulty::Easy ? Difficulty::Hard
-                                                      : Difficulty::Easy;
+        switch (difficulty) {
+          case Difficulty::Easy:
+            difficulty = Difficulty::Medium;
+            break;
+          case Difficulty::Medium:
+            difficulty = Difficulty::Hard;
+            break;
+          case Difficulty::Hard:
+            difficulty = Difficulty::Easy;
+            break;
+        }
         preferences.putUChar("difficulty",
                              static_cast<uint8_t>(difficulty));
+        preferences.putUChar("diffVer", 1);
         staticScreenDirty = true;
       } else if (x >= 99 && x <= 221 && y >= 195 && y <= 226) {
         startGame();
@@ -2834,10 +2877,31 @@ void setup() {
   preferences.begin("cyd-death", false);
   highScore = preferences.getULong("highScore", 0);
   volume = min<uint8_t>(100, preferences.getUChar("volume", 70));
-  difficulty = preferences.getUChar("difficulty", 0) ==
-                       static_cast<uint8_t>(Difficulty::Hard)
-                   ? Difficulty::Hard
-                   : Difficulty::Easy;
+  if (preferences.getUChar("diffVer", 0) == 0) {
+    const uint8_t previousDifficulty = preferences.getUChar("difficulty", 0);
+    difficulty = !preferences.isKey("difficulty")
+                     ? Difficulty::Easy
+                 : previousDifficulty ==
+                           static_cast<uint8_t>(Difficulty::Hard)
+                     ? Difficulty::Hard
+                     : Difficulty::Medium;
+    preferences.putUChar("difficulty",
+                         static_cast<uint8_t>(difficulty));
+    preferences.putUChar("diffVer", 1);
+  } else {
+    const uint8_t savedDifficulty = preferences.getUChar("difficulty", 0);
+    switch (savedDifficulty) {
+      case static_cast<uint8_t>(Difficulty::Medium):
+        difficulty = Difficulty::Medium;
+        break;
+      case static_cast<uint8_t>(Difficulty::Hard):
+        difficulty = Difficulty::Hard;
+        break;
+      default:
+        difficulty = Difficulty::Easy;
+        break;
+    }
+  }
   if (ledcSetup(BUZZER_CHANNEL, 2000, 10) == 0) {
     Serial.println("ERROR: Buzzer PWM initialization failed.");
   } else {
