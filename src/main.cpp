@@ -12,7 +12,7 @@ SPIClass touchSPI(HSPI);
 XPT2046_Touchscreen touch(33, 36);
 Preferences preferences;
 
-constexpr uint8_t MAX_ZOMBIES = 3;
+constexpr uint8_t MAX_ZOMBIES = 5;
 constexpr uint8_t MAX_HIT_EFFECTS = 4;
 constexpr uint8_t MAX_CIVILIANS = 3;
 constexpr uint8_t KILLS_PER_WAVE = 10;
@@ -44,13 +44,20 @@ struct TouchCalibration {
   uint16_t yBottom;
 };
 
+enum class ZombieKind : uint8_t { Police, Suit, Dress };
+enum class ZombieAnimation : uint8_t { Shamble, Lurch, Reach };
+
 struct Zombie {
   float x;
   float y;
+  int16_t entryX;
+  int16_t entryY;
   uint32_t spawnedAt;
   uint32_t nextShotAt;
   uint8_t lane;
   uint8_t torsoHits;
+  ZombieAnimation animation;
+  ZombieKind kind;
   bool active;
   bool hasHat;
 };
@@ -102,6 +109,14 @@ struct SceneProp {
   PropType type;
 };
 
+struct SceneDoor {
+  uint8_t scene;
+  int16_t x;
+  int16_t y;
+  int16_t width;
+  int16_t height;
+};
+
 struct MusicNote {
   uint16_t frequency;
   uint16_t durationMs;
@@ -129,7 +144,11 @@ uint32_t musicNextNoteAt = 0;
 uint32_t reloadFollowupAt = 0;
 uint32_t menuCatLastMovedAt = 0;
 uint32_t menuCatStateUntil = 0;
+uint32_t menuCarLastMovedAt = 0;
+uint32_t menuCarNextPassAt = 0;
 float menuCatX = 26.0f;
+float menuCatTargetX = 160.0f;
+float menuCarX = -150.0f;
 uint8_t lives = STARTING_LIVES;
 uint8_t ammo = MAGAZINE_SIZE;
 uint8_t wave = 1;
@@ -145,6 +164,7 @@ uint8_t transitionLevel = 0;
 uint8_t musicNoteIndex = 0;
 int8_t menuCatDirection = 1;
 bool menuCatWalking = true;
+bool menuCarPassing = false;
 bool touchWasDown = false;
 bool staticScreenDirty = true;
 bool speakerReady = false;
@@ -181,6 +201,32 @@ constexpr SceneProp SCENE_PROPS[] = {
     {4, 1, 205, 49, 14, 31, PropType::Bottle},
     {4, 2, 233, 49, 14, 31, PropType::Bottle},
     {4, 3, 278, 43, 31, 39, PropType::Window},
+};
+
+constexpr SceneDoor SCENE_DOORS[] = {
+    {0, 80, 63, 39, 51}, {0, 200, 55, 34, 59},
+    {1, 75, 37, 28, 76}, {2, 143, 63, 34, 60},
+    {3, 140, 103, 40, 46}, {4, 143, 47, 25, 62},
+};
+
+struct MenuWindowLight {
+  int16_t x;
+  int16_t y;
+  uint32_t nextChangeAt;
+  bool lit;
+  bool permanent;
+  uint16_t color;
+};
+
+MenuWindowLight menuWindowLights[] = {
+    {6, 74, 0, true, true, 0xFFE0},   {18, 87, 0, true, true, 0xFEA0},
+    {37, 49, 0, true, true, 0xFDC0},  {61, 75, 0, true, true, 0xFFE0},
+    {262, 71, 0, true, true, 0xFEA0}, {286, 84, 0, true, true, 0xFDC0},
+    {300, 54, 0, true, true, 0xFFE0}, {312, 93, 0, true, true, 0xFEA0},
+    {30, 74, 0, false, false, 0xFFE0},  {49, 62, 0, false, false, 0xFEA0},
+    {78, 67, 0, false, false, 0xFDC0},  {122, 40, 0, false, false, 0xFFE0},
+    {170, 63, 0, false, false, 0xFEA0}, {215, 58, 0, false, false, 0xFDC0},
+    {262, 97, 0, false, false, 0xFFE0}, {300, 67, 0, false, false, 0xFEA0},
 };
 
 constexpr MusicNote MENU_MUSIC[] = {
@@ -320,6 +366,22 @@ void drawSceneProps(uint8_t level) {
     }
     const bool destroyed = (destroyedSceneProps & (1U << prop.id)) != 0;
     drawSceneProp(prop, destroyed);
+  }
+}
+
+void drawSceneDoors(uint8_t level) {
+  for (const SceneDoor &door : SCENE_DOORS) {
+    if (door.scene != level || level == 0) {
+      continue;
+    }
+    frameBuffer.fillRect(door.x - 3, door.y - 3, door.width + 6,
+                         door.height + 3, wallShadow);
+    frameBuffer.fillRect(door.x, door.y, door.width, door.height, 0x1082);
+    frameBuffer.drawRect(door.x, door.y, door.width, door.height, 0xD69A);
+    frameBuffer.drawFastVLine(door.x + door.width / 2, door.y + 2,
+                              door.height - 3, 0x5AEB);
+    frameBuffer.fillCircle(door.x + door.width / 2 - 3,
+                           door.y + door.height / 2, 2, badgeGold);
   }
 }
 
@@ -753,6 +815,7 @@ void drawCurrentScene(uint32_t now) {
       drawTavern();
       break;
   }
+  drawSceneDoors(level);
   drawSceneProps(level);
   drawSceneryDamage();
 }
@@ -886,8 +949,89 @@ void drawMenuOfficer(uint32_t now) {
   frameBuffer.drawLine(x + 22, torsoY + 32, x + 17, torsoY + 42, 0xD69A);
 }
 
-void drawMenuBackground() {
+void updateMenuCar(uint32_t now) {
+  if (menuCarLastMovedAt == 0) {
+    menuCarLastMovedAt = now;
+  }
+  const uint32_t elapsed = min<uint32_t>(now - menuCarLastMovedAt, 200);
+  menuCarLastMovedAt = now;
+
+  if (menuCarPassing) {
+    menuCarX += elapsed * 0.12f;
+    if (menuCarX > frameBuffer.width() + 185) {
+      menuCarPassing = false;
+      menuCarNextPassAt = now + random(8000, 20001);
+    }
+  } else if (static_cast<int32_t>(now - menuCarNextPassAt) >= 0) {
+    menuCarPassing = true;
+    menuCarX = -185.0f;
+  }
+}
+
+void drawMenuPoliceCar(int16_t carX, int16_t carY) {
+  const auto scale = [](int16_t value) {
+    return static_cast<int16_t>(value * 1.3f);
+  };
+  const uint16_t carWhite = 0xFFFF;
+  const uint16_t carBlue = 0x001F;
+  frameBuffer.fillEllipse(carX + scale(68), carY + scale(42), scale(75),
+                          scale(6), 0x0000);
+  frameBuffer.fillRoundRect(carX + scale(7), carY + scale(18), scale(128),
+                             scale(27), scale(8), carWhite);
+  frameBuffer.fillRoundRect(carX + scale(37), carY + scale(2), scale(69),
+                             scale(22), scale(7), carWhite);
+  frameBuffer.fillRect(carX + scale(45), carY + scale(5), scale(25),
+                       scale(14), 0x0210);
+  frameBuffer.fillRect(carX + scale(74), carY + scale(5), scale(27),
+                       scale(14), 0x0210);
+  frameBuffer.drawFastVLine(carX + scale(72), carY + scale(4), scale(16),
+                            0x7BEF);
+  frameBuffer.fillRect(carX + scale(59), carY - scale(3), scale(14),
+                       scale(4), TFT_RED);
+  frameBuffer.fillRect(carX + scale(73), carY - scale(3), scale(14),
+                       scale(4), TFT_BLUE);
+  frameBuffer.fillRect(carX + scale(20), carY + scale(23), scale(76),
+                       scale(9), carBlue);
+  frameBuffer.fillRect(carX + scale(9), carY + scale(24), scale(11),
+                       scale(6), 0xFEA0);
+  frameBuffer.fillRect(carX + scale(121), carY + scale(23), scale(13),
+                       scale(7), TFT_RED);
+  frameBuffer.fillRect(carX + scale(133), carY + scale(19), scale(8),
+                       scale(15), carWhite);
+  frameBuffer.fillRect(carX + scale(138), carY + scale(22), scale(4),
+                       scale(8), 0xFEA0);
+  frameBuffer.fillRect(carX + scale(110), carY + scale(15), scale(21),
+                       scale(4), 0x7BEF);
+  frameBuffer.fillCircle(carX + scale(37), carY + scale(43), scale(10),
+                         0x0841);
+  frameBuffer.fillCircle(carX + scale(37), carY + scale(43), scale(5),
+                         0xBDF7);
+  frameBuffer.fillCircle(carX + scale(111), carY + scale(43), scale(10),
+                         0x0841);
+  frameBuffer.fillCircle(carX + scale(111), carY + scale(43), scale(5),
+                         0xBDF7);
+  frameBuffer.drawFastHLine(carX + scale(17), carY + scale(36), scale(113),
+                            0x7BEF);
+}
+
+void updateMenuWindowLights(uint32_t now) {
+  for (MenuWindowLight &light : menuWindowLights) {
+    if (light.permanent) {
+      continue;
+    }
+    if (light.nextChangeAt == 0) {
+      light.nextChangeAt = now + random(4000, 18001);
+    } else if (static_cast<int32_t>(now - light.nextChangeAt) >= 0) {
+      light.lit = !light.lit;
+      light.nextChangeAt = now + random(5000, 20001);
+    }
+  }
+}
+
+void drawMenuBackground(uint32_t now) {
   const int16_t width = frameBuffer.width();
+  updateMenuCar(now);
+  updateMenuWindowLights(now);
   frameBuffer.fillSprite(0x0010);
   for (int16_t y = 0; y < 116; y += 12) {
     frameBuffer.fillRect(0, y, width, 12,
@@ -905,8 +1049,16 @@ void drawMenuBackground() {
     frameBuffer.drawFastVLine(x + 2, top, BUILDING_H[i], 0x420F);
     for (int16_t wy = top + 8; wy < 114; wy += 13) {
       for (int16_t wx = x + 6; wx < x + BUILDING_W[i] - 5; wx += 12) {
-        frameBuffer.fillRect(wx, wy, 5, 6,
-                             ((wx + wy) / 13) % 2 == 0 ? 0xFEA0 : 0x7DDF);
+        uint16_t lightColor = 0x318C;
+        for (const MenuWindowLight &light : menuWindowLights) {
+          if (light.x == wx && light.y == wy) {
+            if (light.lit) {
+              lightColor = light.color;
+            }
+            break;
+          }
+        }
+        frameBuffer.fillRect(wx, wy, 5, 6, lightColor);
       }
     }
   }
@@ -919,50 +1071,61 @@ void drawMenuBackground() {
     frameBuffer.fillRect(x, 184, 20, 2, 0x7BEF);
   }
 
-  const int16_t carX = 83;
-  const int16_t carY = 139;
-  frameBuffer.fillEllipse(carX + 78, carY + 42, 73, 6, 0x0000);
-  frameBuffer.fillRoundRect(carX + 5, carY + 16, 144, 31, 8, 0xFFFF);
-  frameBuffer.fillRoundRect(carX + 34, carY, 79, 25, 8, 0xFFFF);
-  frameBuffer.fillRect(carX + 44, carY + 4, 27, 16, 0x0210);
-  frameBuffer.fillRect(carX + 76, carY + 4, 29, 16, 0x0210);
-  frameBuffer.drawFastVLine(carX + 73, carY + 3, 18, 0x7BEF);
-  frameBuffer.fillRect(carX + 61, carY - 4, 14, 4, TFT_RED);
-  frameBuffer.fillRect(carX + 75, carY - 4, 14, 4, TFT_BLUE);
-  frameBuffer.fillRect(carX + 9, carY + 22, 21, 8, 0xFEA0);
-  frameBuffer.fillRect(carX + 127, carY + 22, 17, 7, TFT_RED);
-  frameBuffer.drawRect(carX + 66, carY + 24, 23, 14, uniformBlue);
-  frameBuffer.fillCircle(carX + 34, carY + 45, 10, 0x0841);
-  frameBuffer.fillCircle(carX + 34, carY + 45, 5, 0xBDF7);
-  frameBuffer.fillCircle(carX + 117, carY + 45, 10, 0x0841);
-  frameBuffer.fillCircle(carX + 117, carY + 45, 5, 0xBDF7);
-  frameBuffer.drawFastHLine(carX + 13, carY + 34, 128, 0x7BEF);
+  frameBuffer.fillRect(0, 212, width, frameBuffer.height() - 212, 0x0320);
+  frameBuffer.fillRect(0, 212, width, 3, 0x5B22);
+  for (int16_t x = 6; x < width; x += 17) {
+    const int16_t grassHeight = 4 + (x * 7 % 9);
+    frameBuffer.drawFastVLine(x, 212 - grassHeight, grassHeight, 0x04A0);
+    frameBuffer.drawFastVLine(x + 3, 214 - grassHeight / 2,
+                              grassHeight / 2, 0x3A01);
+  }
+
+  if (menuCarPassing) {
+    drawMenuPoliceCar(static_cast<int16_t>(menuCarX), 143);
+  }
+}
+
+void chooseMenuCatDestination(uint32_t now) {
+  const int16_t targets[] = {
+      18, static_cast<int16_t>(frameBuffer.width() / 2),
+                              static_cast<int16_t>(frameBuffer.width() - 18)};
+  int8_t available[3];
+  uint8_t count = 0;
+  for (uint8_t i = 0; i < 3; ++i) {
+    if (abs(targets[i] - menuCatX) > 45) {
+      available[count++] = i;
+    }
+  }
+  const uint8_t targetIndex =
+      count > 0 ? available[random(0, count)]
+                : (menuCatX < frameBuffer.width() / 2 ? 2 : 0);
+  menuCatTargetX = targets[targetIndex];
+  menuCatDirection = menuCatTargetX > menuCatX ? 1 : -1;
+  menuCatWalking = true;
+  menuCatStateUntil = now + random(3500, 7001);
 }
 
 void updateMenuCat(uint32_t now) {
   const uint32_t elapsed = min<uint32_t>(now - menuCatLastMovedAt, 200);
   menuCatLastMovedAt = now;
   if (menuCatWalking) {
-    menuCatX += menuCatDirection * elapsed * 0.035f;
-    if (menuCatX < 15 || menuCatX > frameBuffer.width() - 15) {
-      menuCatX = constrain(menuCatX, 15.0f,
-                           static_cast<float>(frameBuffer.width() - 15));
-      menuCatDirection = -menuCatDirection;
-    }
-  }
-
-  if (static_cast<int32_t>(now - menuCatStateUntil) >= 0) {
-    menuCatWalking = !menuCatWalking;
-    if (menuCatWalking) {
-      menuCatDirection = random(0, 2) == 0 ? -1 : 1;
-      if ((menuCatDirection < 0 && menuCatX < 55) ||
-          (menuCatDirection > 0 && menuCatX > frameBuffer.width() - 55)) {
-        menuCatDirection = -menuCatDirection;
+    const float distance = abs(menuCatTargetX - menuCatX);
+    const float step = elapsed * 0.055f;
+    if (distance <= step ||
+        static_cast<int32_t>(now - menuCatStateUntil) >= 0) {
+      if (distance <= step) {
+        menuCatX = menuCatTargetX;
+      } else {
+        menuCatX = constrain(menuCatX, 18.0f,
+                             static_cast<float>(frameBuffer.width() - 18));
       }
-      menuCatStateUntil = now + random(1200, 3501);
+      menuCatWalking = false;
+      menuCatStateUntil = now + random(1800, 7001);
     } else {
-      menuCatStateUntil = now + random(900, 3501);
+      menuCatX += menuCatDirection * step;
     }
+  } else if (static_cast<int32_t>(now - menuCatStateUntil) >= 0) {
+    chooseMenuCatDestination(now);
   }
 }
 
@@ -1044,7 +1207,7 @@ void drawMenuZombie(uint32_t now) {
 }
 
 void drawMenu(uint32_t now) {
-  drawMenuBackground();
+  drawMenuBackground(now);
   updateMenuCat(now);
   drawMenuOfficer(now);
   drawMenuZombie(now);
@@ -1076,9 +1239,8 @@ void drawMenu(uint32_t now) {
   frameBuffer.setCursor(200, 137);
   frameBuffer.print("+");
 
-  frameBuffer.fillRoundRect(99, 173, 122, 39, 8, TFT_DARKGREEN);
   frameBuffer.drawRoundRect(99, 173, 122, 39, 8, TFT_WHITE);
-  frameBuffer.setTextColor(TFT_WHITE, TFT_DARKGREEN);
+  frameBuffer.setTextColor(TFT_ORANGE);
   frameBuffer.setTextSize(2);
   frameBuffer.setCursor(133, 183);
   frameBuffer.print("START");
@@ -1093,24 +1255,75 @@ void drawZombie(const Zombie &zombie, uint32_t now) {
   const int16_t x = static_cast<int16_t>(zombie.x);
   const int16_t y = static_cast<int16_t>(zombie.y);
   const uint16_t skin = zombie.lane == 1 ? 0x8D6A : zombieGreen;
-  const int16_t sway = (now / 150 + zombie.lane) % 2 == 0 ? -3 : 3;
-  const int16_t bob = (now / 210 + zombie.lane) % 2 == 0 ? 0 : 2;
+  const uint32_t animationPhase =
+      now / (zombie.animation == ZombieAnimation::Lurch ? 310 : 190) +
+      zombie.lane;
+  const bool animationStep = animationPhase % 2 != 0;
+  const int16_t sway = animationStep ? -4 : 4;
+  const int16_t bob = zombie.animation == ZombieAnimation::Lurch
+                          ? (animationStep ? 3 : -1)
+                          : zombie.animation == ZombieAnimation::Reach
+                                ? (animationStep ? 2 : 0)
+                                : (animationStep ? 0 : 2);
   const bool emerging = age < ZOMBIE_EMERGE_MS;
+  const int16_t headLean =
+      zombie.animation == ZombieAnimation::Lurch && animationStep ? -2 : 0;
   const int16_t torsoTop = y - radius / 2 + bob;
   const int16_t torsoWidth = max<int16_t>(12, radius);
   const int16_t headRadius = radius / 2 + 2;
+  const bool isPolice = zombie.kind == ZombieKind::Police;
+  const uint16_t suitColor = zombie.lane == 1 ? 0x4208 : 0x3186;
+  const uint16_t dressColor = zombie.lane == 1 ? 0xF81F : 0x8010;
+  const uint16_t outfitColor = isPolice ? uniformBlue :
+                               zombie.kind == ZombieKind::Suit ? suitColor :
+                               dressColor;
+  const uint16_t pantsColor = isPolice ? uniformBlue : suitColor;
+  const int16_t stride = animationStep ? -7 : 7;
+  const int16_t armSwing = zombie.animation == ZombieAnimation::Lurch
+                               ? (animationStep ? 10 : -7)
+                               : zombie.animation == ZombieAnimation::Reach
+                                     ? (animationStep ? -12 : -5)
+                                     : sway;
 
   frameBuffer.fillEllipse(x, y + radius / 2 + bob, radius / 2 + 3,
                           radius / 3 + 2, zombieDark);
   frameBuffer.fillRoundRect(x - torsoWidth / 2, torsoTop, torsoWidth,
-                            radius + 9, 5, uniformBlue);
-  frameBuffer.fillRect(x - torsoWidth / 2 + 2, torsoTop + 2,
-                       max<int16_t>(3, torsoWidth / 5), radius + 3, uniformLight);
-  frameBuffer.drawFastVLine(x, torsoTop + 3, radius + 4, 0x10D3);
-  frameBuffer.fillCircle(x, y - radius + bob, headRadius, skin);
+                            radius + 9, 5, outfitColor);
+  if (isPolice) {
+    frameBuffer.fillRect(x - torsoWidth / 2 + 2, torsoTop + 2,
+                         max<int16_t>(3, torsoWidth / 5), radius + 3,
+                         uniformLight);
+    frameBuffer.drawFastVLine(x, torsoTop + 3, radius + 4, 0x10D3);
+    frameBuffer.fillRect(x + torsoWidth / 5, torsoTop + 5, 5, 6, badgeGold);
+    frameBuffer.drawFastHLine(x - torsoWidth / 3, torsoTop + 8,
+                              max<int16_t>(3, torsoWidth / 4), 0xFFFF);
+  } else if (zombie.kind == ZombieKind::Suit) {
+    frameBuffer.fillTriangle(x - torsoWidth / 3, torsoTop + 3,
+                             x - 2, torsoTop + 14, x + 1,
+                             torsoTop + 3, 0xFFFF);
+    frameBuffer.fillTriangle(x + torsoWidth / 3, torsoTop + 3,
+                             x - 2, torsoTop + 14, x + 1,
+                             torsoTop + 3, 0xFFFF);
+    frameBuffer.fillTriangle(x - 2, torsoTop + 11, x + 2, torsoTop + 11,
+                             x, torsoTop + 20, TFT_RED);
+  } else {
+    frameBuffer.fillTriangle(x - torsoWidth / 2, torsoTop + radius / 3,
+                             x + torsoWidth / 2, torsoTop + radius / 3,
+                             x + torsoWidth / 2 + 2, torsoTop + radius + 9,
+                             dressColor);
+    frameBuffer.fillTriangle(x - torsoWidth / 2, torsoTop + radius / 3,
+                             x + torsoWidth / 2 + 2, torsoTop + radius + 9,
+                             x - torsoWidth / 2 - 2, torsoTop + radius + 9,
+                             dressColor);
+    frameBuffer.drawFastHLine(x - torsoWidth / 2 - 1,
+                              torsoTop + radius + 7, torsoWidth + 2,
+                              0xF9B6);
+  }
+  frameBuffer.fillCircle(x + headLean, y - radius + bob, headRadius, skin);
 
+  const int16_t headX = x + headLean;
   const int16_t capY = y - radius - headRadius + bob;
-  if (zombie.hasHat) {
+  if (isPolice && zombie.hasHat) {
     frameBuffer.fillRect(x - headRadius - 2, capY + 2, headRadius * 2 + 4, 5,
                          uniformBlue);
     frameBuffer.fillRoundRect(x - headRadius, capY - 3, headRadius * 2, 7,
@@ -1119,27 +1332,39 @@ void drawZombie(const Zombie &zombie, uint32_t now) {
   }
 
   const int16_t eyeOffset = max<int16_t>(3, headRadius / 3);
-  frameBuffer.fillCircle(x - eyeOffset, y - radius + bob, 2, TFT_RED);
-  frameBuffer.fillCircle(x + eyeOffset, y - radius + bob, 2, TFT_RED);
-  frameBuffer.drawFastHLine(x - 3, y - radius + headRadius / 2 + bob, 7,
+  frameBuffer.fillCircle(headX - eyeOffset, y - radius + bob, 2, TFT_RED);
+  frameBuffer.fillCircle(headX + eyeOffset, y - radius + bob, 2, TFT_RED);
+  frameBuffer.drawFastHLine(headX - 3, y - radius + headRadius / 2 + bob, 7,
                             zombieDark);
-  frameBuffer.fillRect(x + torsoWidth / 5, torsoTop + 5, 5, 6, badgeGold);
-  frameBuffer.drawFastHLine(x - torsoWidth / 3, torsoTop + 8,
-                            max<int16_t>(3, torsoWidth / 4), 0xFFFF);
+  if (!isPolice) {
+    if (zombie.kind == ZombieKind::Suit) {
+      frameBuffer.fillRect(headX - headRadius, y - radius + bob - headRadius / 3,
+                           headRadius * 2, max<int16_t>(2, headRadius / 3),
+                           0x2104);
+    } else {
+      frameBuffer.fillCircle(headX - headRadius + 2,
+                             y - radius + bob + 1, headRadius / 2, 0x2104);
+      frameBuffer.fillCircle(headX + headRadius - 2,
+                             y - radius + bob + 1, headRadius / 2, 0x2104);
+    }
+  }
   for (uint8_t hit = 0; hit < zombie.torsoHits; ++hit) {
     const int16_t woundX = x - torsoWidth / 3 + hit * 5;
     frameBuffer.drawLine(woundX, torsoTop + 13, woundX + 4,
                          torsoTop + 18, woundRed);
   }
-  frameBuffer.drawLine(x + torsoWidth / 2, torsoTop + 7,
-                       x + torsoWidth / 2 + 8, torsoTop + 12, skin);
-  frameBuffer.fillRect(x + torsoWidth / 2 + 6, torsoTop + 9, 9, 4,
-                       wallShadow);
-  frameBuffer.fillRect(x + torsoWidth / 2 + 12, torsoTop + 7, 4, 3,
-                       deskEdge);
+  if (isPolice) {
+    frameBuffer.drawLine(x + torsoWidth / 2, torsoTop + 7,
+                         x + torsoWidth / 2 + 8, torsoTop + 12, skin);
+    frameBuffer.fillRect(x + torsoWidth / 2 + 6, torsoTop + 9, 9, 4,
+                         wallShadow);
+    frameBuffer.fillRect(x + torsoWidth / 2 + 12, torsoTop + 7, 4, 3,
+                         deskEdge);
+  }
 
   const int32_t shotWarning = static_cast<int32_t>(zombie.nextShotAt - now);
-  if (shotWarning > 0 && shotWarning <= ENEMY_SHOT_WARNING_MS) {
+  if (isPolice && shotWarning > 0 &&
+      shotWarning <= ENEMY_SHOT_WARNING_MS) {
     frameBuffer.setTextColor(TFT_RED);
     frameBuffer.setTextSize(2);
     frameBuffer.setCursor(x - 3, capY - 24);
@@ -1148,28 +1373,49 @@ void drawZombie(const Zombie &zombie, uint32_t now) {
 
   if (emerging) {
     const int16_t reach = 9 + age / 210;
+    const int16_t leftReach =
+        zombie.animation == ZombieAnimation::Lurch && animationStep
+            ? reach / 2
+            : zombie.animation == ZombieAnimation::Reach ? reach + 9 : reach;
+    const int16_t rightReach =
+        zombie.animation == ZombieAnimation::Lurch && !animationStep
+            ? reach / 2
+            : zombie.animation == ZombieAnimation::Reach ? reach + 9 : reach;
     frameBuffer.drawLine(x - torsoWidth / 2, torsoTop + 6,
-                         x - torsoWidth - 5, torsoTop - reach + sway, skin);
+                         x - torsoWidth - 5,
+                         torsoTop - leftReach + armSwing, skin);
     frameBuffer.drawLine(x + torsoWidth / 2, torsoTop + 6,
-                         x + torsoWidth + 5, torsoTop - reach - sway, skin);
-    frameBuffer.fillCircle(x - torsoWidth - 5, torsoTop - reach + sway, 3, skin);
-    frameBuffer.fillCircle(x + torsoWidth + 5, torsoTop - reach - sway, 3, skin);
+                         x + torsoWidth + 5,
+                         torsoTop - rightReach - armSwing, skin);
+    frameBuffer.fillCircle(x - torsoWidth - 5,
+                           torsoTop - leftReach + armSwing, 3, skin);
+    frameBuffer.fillCircle(x + torsoWidth + 5,
+                           torsoTop - rightReach - armSwing, 3, skin);
   } else {
-    const int16_t stride = (now / 130 + zombie.lane) % 2 == 0 ? -7 : 7;
+    const int16_t leftArmY = zombie.animation == ZombieAnimation::Reach
+                                 ? torsoTop - 5
+                                 : torsoTop + radius / 2 + armSwing;
+    const int16_t rightArmY = zombie.animation == ZombieAnimation::Reach
+                                  ? torsoTop - 5
+                                  : torsoTop + radius / 2 - armSwing;
+    const int16_t leftArmX =
+        zombie.animation == ZombieAnimation::Reach ? x - torsoWidth - 10
+                                                    : x - torsoWidth - 4;
+    const int16_t rightArmX =
+        zombie.animation == ZombieAnimation::Reach ? x + torsoWidth + 10
+                                                    : x + torsoWidth + 4;
     frameBuffer.drawLine(x - torsoWidth / 2, torsoTop + 7,
-                         x - torsoWidth - 4, torsoTop + radius / 2 + sway, skin);
+                         leftArmX, leftArmY, skin);
     frameBuffer.drawLine(x + torsoWidth / 2, torsoTop + 7,
-                         x + torsoWidth + 4, torsoTop + radius / 2 - sway, skin);
-    frameBuffer.fillCircle(x - torsoWidth - 4,
-                           torsoTop + radius / 2 + sway, 3, skin);
-    frameBuffer.fillCircle(x + torsoWidth + 4,
-                           torsoTop + radius / 2 - sway, 3, skin);
+                         rightArmX, rightArmY, skin);
+    frameBuffer.fillCircle(leftArmX, leftArmY, 3, skin);
+    frameBuffer.fillCircle(rightArmX, rightArmY, 3, skin);
     frameBuffer.drawLine(x - torsoWidth / 4, y + radius / 2,
                          x - torsoWidth / 3 + stride, y + radius + 8,
-                         uniformBlue);
+                         pantsColor);
     frameBuffer.drawLine(x + torsoWidth / 4, y + radius / 2,
                          x + torsoWidth / 3 - stride, y + radius + 8,
-                         uniformBlue);
+                         pantsColor);
   }
   frameBuffer.drawFastHLine(x - radius / 3, y - radius / 2,
                             max<int16_t>(3, radius * 2 / 3), woundRed);
@@ -1620,19 +1866,61 @@ void startGame() {
   screen = Screen::Playing;
 }
 
+void chooseZombieEntry(uint8_t level, int16_t &x, int16_t &y) {
+  uint8_t entryCount = 0;
+  for (const SceneProp &prop : SCENE_PROPS) {
+    if (prop.scene == level && prop.type == PropType::Window) {
+      ++entryCount;
+    }
+  }
+  for (const SceneDoor &door : SCENE_DOORS) {
+    if (door.scene == level) {
+      ++entryCount;
+    }
+  }
+
+  uint8_t selected = random(0, entryCount);
+  for (const SceneProp &prop : SCENE_PROPS) {
+    if (prop.scene != level || prop.type != PropType::Window) {
+      continue;
+    }
+    if (selected-- == 0) {
+      x = prop.x + prop.width / 2;
+      y = prop.y + prop.height;
+      return;
+    }
+  }
+  for (const SceneDoor &door : SCENE_DOORS) {
+    if (door.scene != level) {
+      continue;
+    }
+    if (selected-- == 0) {
+      x = door.x + door.width / 2;
+      y = door.y + door.height;
+      return;
+    }
+  }
+  x = frameBuffer.width() / 2;
+  y = 154;
+}
+
 void spawnZombie(uint32_t now) {
   for (Zombie &zombie : zombies) {
     if (zombie.active) {
       continue;
     }
     zombie.lane = random(0, 3);
-    zombie.x = POLICE_LANE_X[zombie.lane];
-    zombie.y = 171;
+    chooseZombieEntry(currentLevel(), zombie.entryX, zombie.entryY);
+    zombie.x = zombie.entryX;
+    zombie.y = zombie.entryY;
     zombie.spawnedAt = now;
-    zombie.nextShotAt =
-        now + ZOMBIE_EMERGE_MS + random(650, 1801);
+    zombie.kind = static_cast<ZombieKind>(random(0, 3));
+    zombie.animation = static_cast<ZombieAnimation>(random(0, 3));
+    zombie.nextShotAt = zombie.kind == ZombieKind::Police
+                            ? now + ZOMBIE_EMERGE_MS + random(650, 1801)
+                            : UINT32_MAX;
     zombie.torsoHits = 0;
-    zombie.hasHat = true;
+    zombie.hasHat = zombie.kind == ZombieKind::Police;
     zombie.active = true;
     return;
   }
@@ -1683,19 +1971,28 @@ void updateZombies(uint32_t now) {
       continue;
     }
     const uint32_t age = now - zombie.spawnedAt;
-    const uint32_t climbAge = min<uint32_t>(age, ZOMBIE_EMERGE_MS);
     const uint32_t approachAge =
         age > ZOMBIE_EMERGE_MS ? age - ZOMBIE_EMERGE_MS : 0;
-    const float climbProgress =
-        static_cast<float>(climbAge) / ZOMBIE_EMERGE_MS;
+    const float emergeProgress =
+        min<uint32_t>(age, ZOMBIE_EMERGE_MS) /
+        static_cast<float>(ZOMBIE_EMERGE_MS);
     const float approachProgress =
         min<uint32_t>(approachAge, ZOMBIE_REACH_PLAYER_MS - ZOMBIE_EMERGE_MS) /
         static_cast<float>(ZOMBIE_REACH_PLAYER_MS - ZOMBIE_EMERGE_MS);
-    zombie.y = 171 - climbProgress * 17 + approachProgress * 72;
-    const float laneConvergence = approachProgress * 0.38f;
-    zombie.x = 160 + (POLICE_LANE_X[zombie.lane] - 160) * (1.0f - laneConvergence);
+    if (age < ZOMBIE_EMERGE_MS) {
+      zombie.x = zombie.entryX +
+                 (POLICE_LANE_X[zombie.lane] - zombie.entryX) *
+                     emergeProgress;
+      zombie.y = zombie.entryY + (154 - zombie.entryY) * emergeProgress;
+    } else {
+      zombie.y = 154 + approachProgress * 72;
+      const float laneConvergence = approachProgress * 0.38f;
+      zombie.x = 160 + (POLICE_LANE_X[zombie.lane] - 160) *
+                           (1.0f - laneConvergence);
+    }
 
-    if (static_cast<int32_t>(now - zombie.nextShotAt) >= 0) {
+    if (zombie.kind == ZombieKind::Police &&
+        static_cast<int32_t>(now - zombie.nextShotAt) >= 0) {
       bool shotQueued = false;
       for (EnemyShot &shot : enemyShots) {
         if (shot.active) {
@@ -1931,11 +2228,11 @@ void setup() {
   }
 
   randomSeed(esp_random());
-  menuCatX = random(25, display.width() - 25);
-  menuCatDirection = random(0, 2) == 0 ? -1 : 1;
-  menuCatWalking = true;
+  menuCarLastMovedAt = millis();
+  menuCarNextPassAt = menuCarLastMovedAt + random(8000, 20001);
+  menuCatX = random(24, display.width() - 24);
   menuCatLastMovedAt = millis();
-  menuCatStateUntil = menuCatLastMovedAt + random(1200, 3501);
+  chooseMenuCatDestination(menuCatLastMovedAt);
   screen = Screen::Menu;
   startMusic(MusicTrack::Menu, millis());
 }

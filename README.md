@@ -10,13 +10,18 @@ score.
 
 - The title screen features an animated, armed police officer on the left and
   a zombie that looks back and forth on the right. In front of the city
-  skyline and police car, a cat walks for a random time of at least one second,
-  sits and waits, then chooses a new random direction.
+  skyline, the side-view police car occasionally drives from left to right.
+  Individual house lights switch on and off infrequently, and the cat walks to
+  a random point at the center or edge for up to 3.5–7 seconds, then sits for
+  a random 1.8–7 second pause before choosing its next direction.
 - Tap **Start** on the title screen.
-- Zombie officers emerge from behind the desks and advance toward you. They
-  telegraph and fire at the player sooner; each bullet that lands costs one
-  life. They move faster but arrive less frequently. Shoot an officer before
-  its bullet hits or it reaches you.
+- Zombies emerge through scene windows and doors before advancing toward you.
+  Police officers and civilians in suits or dresses can appear; only officers
+  telegraph and shoot, and each bullet that lands costs one life. Stop every
+  zombie before it reaches you.
+- Up to five zombies can appear at once. Each zombie is randomly assigned one
+  of three distinct shambling, lurching, or reaching animations. Up to three
+  peaceful civilians or animals can be on screen at once.
 - A headshot defeats an officer in one hit. The torso takes three hits; wounds
   appear as it takes damage.
 - The player has a ten-round magazine. Every shot uses one round, including
@@ -29,7 +34,7 @@ score.
 - Background props—including windows, monitors, bottles, bins, and a
   chandelier—break visibly when hit. Broken props remain damaged for the
   current scene, and scenery hits never add points.
-- Every 20 defeated zombie officers advances to the next scene. The five
+- Every 20 defeated zombies advances to the next scene. The five
   scenes repeat after the tavern, with a short animated scene transition.
 - Dogs, cats, men, women, and children may cross the scene. Shooting a
   bystander costs one life and does not award points.
