@@ -405,7 +405,7 @@ void drawSceneProps(uint8_t level) {
 
 void drawSceneDoors(uint8_t level) {
   for (const SceneDoor &door : SCENE_DOORS) {
-    if (door.scene != level || level == 0) {
+    if (door.scene != level) {
       continue;
     }
     frameBuffer.fillRect(door.x - 3, door.y - 3, door.width + 6,
@@ -516,12 +516,8 @@ void updateMusic(uint32_t now) {
   }
 
   if (musicNoteIndex >= noteCount) {
-    if (musicTrack == MusicTrack::Victory) {
-      musicNoteIndex = 0;
-    } else {
-      musicTrack = MusicTrack::None;
-      return;
-    }
+    musicTrack = MusicTrack::None;
+    return;
   }
   const MusicNote note = notes[musicNoteIndex++];
   musicNextNoteAt = now + note.durationMs + MUSIC_NOTE_GAP_MS;
@@ -911,19 +907,12 @@ void drawAlley() {
   frameBuffer.drawFastHLine(249, 36, 71, 0x7BEF);
   drawBrickPattern(0, 39, 72, 137, 27, 14, 0x5AEB);
   drawBrickPattern(248, 39, 320, 137, 31, 15, 0x4A49);
+  frameBuffer.fillRect(72, 39, 176, 78, 0x2945);
+  drawBrickPattern(72, 39, 248, 117, 25, 13, 0x39C7);
+  frameBuffer.drawFastHLine(72, 114, 176, 0x7BEF);
   for (int16_t x = 9; x < 70; x += 28) {
     frameBuffer.fillRect(x, 39, 3, 97, 0x2124);
     frameBuffer.drawFastVLine(x + 3, 39, 97, 0x7BEF);
-  }
-  for (int16_t y = 47; y < 120; y += 27) {
-    frameBuffer.fillRect(12, y, 25, 16, 0x0841);
-    frameBuffer.fillRect(15, y + 3, 19, 10, (y % 2 == 0) ? 0xFEA0 : 0xFDC0);
-    frameBuffer.fillRect(17, y + 4, 3, 8, 0xFFFF);
-    frameBuffer.drawRect(12, y, 25, 16, 0x7BEF);
-    frameBuffer.fillRect(273, y - 3, 32, 20, 0x0841);
-    frameBuffer.fillRect(277, y + 1, 24, 12, (y % 2 == 0) ? 0xFEA0 : 0xFDC0);
-    frameBuffer.fillRect(281, y + 2, 4, 10, 0xFFFF);
-    frameBuffer.drawRect(273, y - 3, 32, 20, 0x7BEF);
   }
   frameBuffer.drawFastHLine(0, 119, 72, 0xBDF7);
   frameBuffer.drawFastHLine(248, 119, 72, 0x9CF3);
@@ -931,28 +920,6 @@ void drawAlley() {
   frameBuffer.fillRect(12, 125, 3, 16, 0x7BEF);
   frameBuffer.fillRect(302, 120, 4, 23, 0x7BEF);
   frameBuffer.fillRect(306, 120, 3, 23, 0x4208);
-  frameBuffer.drawLine(0, 62, 158, 52, 0x0841);
-  frameBuffer.drawLine(163, 52, 320, 64, 0x0841);
-  frameBuffer.drawLine(0, 66, 158, 56, 0x7BEF);
-  frameBuffer.drawLine(163, 56, 320, 68, 0x5AEB);
-  frameBuffer.fillRect(155, 50, 10, 14, 0x2124);
-  frameBuffer.fillRect(157, 51, 6, 3, TFT_YELLOW);
-  frameBuffer.fillRect(80, 63, 39, 51, 0x18E3);
-  frameBuffer.drawRect(80, 63, 39, 51, 0x8410);
-  frameBuffer.fillRect(200, 55, 34, 59, 0x1082);
-  frameBuffer.drawRect(200, 55, 34, 59, 0x5AEB);
-  for (int16_t y = 70; y < 108; y += 12) {
-    frameBuffer.drawFastHLine(84, y, 30, 0x39E7);
-    frameBuffer.drawFastHLine(204, y, 26, 0x2945);
-  }
-  frameBuffer.fillRect(123, 91, 25, 23, 0x2124);
-  frameBuffer.fillRect(126, 94, 19, 20, 0x5AEB);
-  frameBuffer.drawRect(123, 91, 25, 23, 0x7BEF);
-  frameBuffer.fillRect(128, 99, 14, 12, 0x1082);
-  frameBuffer.fillRect(148, 102, 24, 13, 0x0010);
-  frameBuffer.fillRect(173, 95, 24, 19, 0x3186);
-  frameBuffer.drawRect(173, 95, 24, 19, 0x7BEF);
-
   drawPerspectiveFloor(116, frameBuffer.height(), frameBuffer.width() / 2,
                       0x2104, 0x3186, 20);
   frameBuffer.drawLine(35, 178, 49, 170, 0x4208);
@@ -2067,8 +2034,10 @@ void drawPlayerDamage(uint32_t now) {
 }
 
 bool isReloadButtonHit(int16_t x, int16_t y) {
-  return x >= frameBuffer.width() - 120 && x < frameBuffer.width() &&
-         y >= frameBuffer.height() - 44 && y <= frameBuffer.height() - 6;
+  const int16_t buttonX = frameBuffer.width() - 112;
+  const int16_t buttonY = frameBuffer.height() - 48;
+  return x >= buttonX - 12 && x <= buttonX + 116 &&
+         y >= buttonY - 10 && y <= buttonY + 36;
 }
 
 void drawAmmo() {
@@ -2085,16 +2054,15 @@ void drawAmmo() {
 
   const bool needsReload = ammo == 0;
   const uint16_t buttonColor = needsReload ? TFT_RED : 0x4208;
-  frameBuffer.fillRoundRect(frameBuffer.width() - 112,
-                            frameBuffer.height() - 30, 104, 25, 5,
+  const int16_t buttonX = frameBuffer.width() - 112;
+  const int16_t buttonY = frameBuffer.height() - 48;
+  frameBuffer.fillRoundRect(buttonX, buttonY, 104, 25, 5,
                             buttonColor);
-  frameBuffer.drawRoundRect(frameBuffer.width() - 112,
-                            frameBuffer.height() - 30, 104, 25, 5,
+  frameBuffer.drawRoundRect(buttonX, buttonY, 104, 25, 5,
                             needsReload ? TFT_YELLOW : 0x7BEF);
   frameBuffer.setTextColor(TFT_WHITE, buttonColor);
   frameBuffer.setTextSize(1);
-  frameBuffer.setCursor(frameBuffer.width() - 88,
-                        frameBuffer.height() - 22);
+  frameBuffer.setCursor(buttonX + 24, buttonY + 8);
   frameBuffer.print("RELOAD");
 }
 
@@ -2255,11 +2223,16 @@ void drawGameOver(uint32_t now) {
                      levelName(lastSceneReached - 1));
   frameBuffer.setCursor(20, 180);
   frameBuffer.printf("BEST %lu", static_cast<unsigned long>(highScore));
-  frameBuffer.fillRoundRect(17, 198, 193, 29, 8, TFT_DARKGREEN);
-  frameBuffer.drawRoundRect(17, 198, 193, 29, 8, TFT_WHITE);
+  frameBuffer.fillRoundRect(16, 198, 137, 29, 8, TFT_DARKGREEN);
+  frameBuffer.drawRoundRect(16, 198, 137, 29, 8, TFT_WHITE);
   frameBuffer.setTextColor(TFT_WHITE, TFT_DARKGREEN);
-  frameBuffer.setCursor(76, 209);
+  frameBuffer.setCursor(56, 209);
   frameBuffer.print("PLAY AGAIN");
+  frameBuffer.fillRoundRect(163, 198, 141, 29, 8, 0x4208);
+  frameBuffer.drawRoundRect(163, 198, 141, 29, 8, TFT_WHITE);
+  frameBuffer.setTextColor(TFT_WHITE, 0x4208);
+  frameBuffer.setCursor(207, 209);
+  frameBuffer.print("MAIN MENU");
   frameBuffer.pushSprite(0, 0);
 }
 
@@ -2331,10 +2304,12 @@ void drawVictory(uint32_t now) {
   frameBuffer.setTextSize(2);
   frameBuffer.setCursor(62, 25);
   frameBuffer.print("CITY SAVED!");
-  frameBuffer.setTextColor(TFT_WHITE);
+  frameBuffer.fillRoundRect(80, height - 38, width - 160, 29, 7, 0x4208);
+  frameBuffer.drawRoundRect(80, height - 38, width - 160, 29, 7, TFT_WHITE);
+  frameBuffer.setTextColor(TFT_WHITE, 0x4208);
   frameBuffer.setTextSize(1);
-  frameBuffer.setCursor(91, height - 17);
-  frameBuffer.print("TAP TO RETURN TO MENU");
+  frameBuffer.setCursor(116, height - 28);
+  frameBuffer.print("MAIN MENU");
   frameBuffer.pushSprite(0, 0);
 }
 
@@ -2503,6 +2478,12 @@ void endVictory() {
   screen = Screen::Victory;
   staticScreenDirty = true;
   startMusic(MusicTrack::Victory, millis());
+}
+
+void returnToMainMenu() {
+  screen = Screen::Menu;
+  startMusic(MusicTrack::Menu, millis());
+  staticScreenDirty = true;
 }
 
 void updateZombies(uint32_t now) {
@@ -2833,13 +2814,16 @@ void handleTouch() {
       } else {
         shootAt(x, y);
       }
-    } else if (screen == Screen::GameOver &&
-               x >= 17 && x <= 210 && y >= 187 && y <= 228) {
-      startGame();
-    } else if (screen == Screen::Victory) {
-      screen = Screen::Menu;
-      startMusic(MusicTrack::Menu, millis());
-      staticScreenDirty = true;
+    } else if (screen == Screen::GameOver && y >= 198 && y <= 227) {
+      if (x >= 16 && x <= 153) {
+        startGame();
+      } else if (x >= 163 && x <= 304) {
+        returnToMainMenu();
+      }
+    } else if (screen == Screen::Victory &&
+               x >= 80 && x <= 240 &&
+               y >= display.height() - 38 && y <= display.height() - 9) {
+      returnToMainMenu();
     }
   }
   touchWasDown = isTouching;

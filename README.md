@@ -64,7 +64,8 @@ score.
   saved on the CYD, and each adjustment plays an audible preview.
 - Each zombie that reaches the foreground costs one life. Game Over shows the
   run's score, defeats, headshots, best combo, hit accuracy, and furthest scene;
-  tap **PLAY AGAIN** to immediately restart with the selected difficulty.
+  tap **PLAY AGAIN** to immediately restart with the selected difficulty, or
+  **MAIN MENU** to return to the title screen.
 - Your high score is saved in the CYD's non-volatile preferences as soon as a
   new record is reached.
 - Original, synthesized retro-style buzzer music plays once on the title and
@@ -75,7 +76,7 @@ score.
   backyard. The alley and backyard have visible night skies.
 - Defeat 100 zombies to complete all five scenes and reach the victory
   screen, where a celebrating crowd gathers in front of the town hall under
-  animated fireworks. Tap the screen to return to the title.
+  animated fireworks. Tap **MAIN MENU** at the bottom to return to the title.
 - The Game Over screen features a celebrating zombie officer animated on the
   right side of the display.
 
