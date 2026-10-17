@@ -32,6 +32,8 @@ constexpr uint16_t ZOMBIE_REACH_PLAYER_MS = 8500;
 constexpr uint16_t BOSS_REACH_PLAYER_MS = 18000;
 constexpr uint16_t BOSS_WEAKPOINT_CYCLE_MS = 2600;
 constexpr uint16_t BOSS_WEAKPOINT_OPEN_MS = 1300;
+constexpr uint8_t BOSS_HEAD_HITS = 3;
+constexpr uint8_t BOSS_TORSO_HITS = 5;
 constexpr uint16_t RUNNER_REACH_PLAYER_MS = 6200;
 constexpr uint16_t BRUTE_REACH_PLAYER_MS = 12500;
 constexpr uint16_t HIT_EFFECT_DURATION_MS = 420;
@@ -72,6 +74,7 @@ struct Zombie {
   uint32_t nextShotAt;
   uint8_t lane;
   uint8_t torsoHits;
+  uint8_t headHits;
   ZombieAnimation animation;
   ZombieKind kind;
   bool active;
@@ -622,6 +625,48 @@ void drawDesk(int16_t x, int16_t y, int16_t width, int16_t height) {
   frameBuffer.fillRect(x + halfWidth - 21, y + 10, 13, 7, 0xD69A);
 }
 
+void drawBrickPattern(int16_t left, int16_t top, int16_t right,
+                      int16_t bottom, int16_t brickWidth,
+                      int16_t brickHeight, uint16_t mortarColor) {
+  for (int16_t y = top; y < bottom; y += brickHeight) {
+    frameBuffer.drawFastHLine(left, y, right - left, mortarColor);
+    const int16_t offset = ((y - top) / brickHeight) % 2 == 0
+                               ? 0
+                               : brickWidth / 2;
+    for (int16_t x = left + offset; x < right; x += brickWidth) {
+      frameBuffer.drawFastVLine(x, y, brickHeight, mortarColor);
+    }
+  }
+}
+
+void drawPerspectiveFloor(int16_t top, int16_t bottom, int16_t centerX,
+                          uint16_t baseColor, uint16_t groutColor,
+                          uint8_t lineSpacing) {
+  frameBuffer.fillRect(0, top, frameBuffer.width(), bottom - top, baseColor);
+  for (int16_t x = -80; x <= frameBuffer.width() + 80; x += 40) {
+    frameBuffer.drawLine(centerX, top, x, bottom, groutColor);
+  }
+  for (int16_t y = top + lineSpacing; y < bottom; y += lineSpacing) {
+    const int16_t offset = y - top;
+    const int16_t left = max<int16_t>(0, centerX - offset * 2);
+    const int16_t right = min<int16_t>(frameBuffer.width(),
+                                       centerX + offset * 2);
+    frameBuffer.drawFastHLine(left, y, right - left, groutColor);
+  }
+}
+
+void drawWoodFloor(int16_t top, uint16_t baseColor, uint16_t seamColor,
+                   uint8_t plankSpacing) {
+  const int16_t bottom = frameBuffer.height();
+  frameBuffer.fillRect(0, top, frameBuffer.width(), bottom - top, baseColor);
+  for (int16_t x = -80; x <= frameBuffer.width() + 80; x += 48) {
+    frameBuffer.drawLine(frameBuffer.width() / 2, top, x, bottom, seamColor);
+  }
+  for (int16_t y = top + plankSpacing; y < bottom; y += plankSpacing) {
+    frameBuffer.drawFastHLine(0, y, frameBuffer.width(), seamColor);
+  }
+}
+
 const char *levelName(uint8_t level) {
   constexpr const char *names[LEVEL_COUNT] = {
       "ALLEY", "POLICE STATION", "BALLROOM", "BACKYARD", "TAVERN"};
@@ -642,7 +687,7 @@ uint8_t zombieTorsoHealth(ZombieKind kind) {
     case ZombieKind::Brute:
       return 5;
     case ZombieKind::Boss:
-      return 6;
+      return BOSS_TORSO_HITS;
     default:
       return 3;
   }
@@ -728,19 +773,48 @@ void resetCombo() {
 
 void drawPoliceStation(uint32_t now) {
   const int16_t floorY = 113;
-  frameBuffer.fillScreen(0x18E3);
-  frameBuffer.fillRect(0, 25, frameBuffer.width(), 94, wallColor);
-  frameBuffer.fillRect(0, 32, frameBuffer.width(), 2, 0x5AEB);
-  frameBuffer.fillRect(73, 35, 3, 66, 0x2945);
-  frameBuffer.fillRect(243, 35, 3, 66, 0x2945);
-  frameBuffer.fillRect(0, 25, frameBuffer.width(), 7, wallShadow);
-  frameBuffer.fillRect(0, 103, frameBuffer.width(), 10, wallShadow);
+  frameBuffer.fillScreen(0x1082);
+  frameBuffer.fillRect(0, 25, frameBuffer.width(), 94, 0x31A6);
+  frameBuffer.fillRect(0, 25, frameBuffer.width(), 12, 0x2945);
+  frameBuffer.fillRect(0, 37, frameBuffer.width(), 3, 0x5AEB);
+  drawBrickPattern(0, 42, frameBuffer.width(), 111, 29, 16, 0x39C7);
+  frameBuffer.fillRect(0, 109, frameBuffer.width(), 10, 0x2124);
+  frameBuffer.fillRect(0, 111, frameBuffer.width(), 3, 0x7BEF);
+  frameBuffer.fillRect(0, 115, frameBuffer.width(), 8, 0x4208);
+  for (int16_t x = 18; x < frameBuffer.width(); x += 68) {
+    frameBuffer.fillRect(x, 26, 42, 6, 0x5AEB);
+    frameBuffer.drawFastHLine(x + 4, 28, 34, 0xBDF7);
+    frameBuffer.fillRect(x + 6, 30, 4, 2, TFT_YELLOW);
+  }
+  frameBuffer.fillRect(73, 40, 3, 68, 0x2945);
+  frameBuffer.fillRect(243, 40, 3, 68, 0x2945);
+  frameBuffer.fillRect(70, 40, 2, 67, 0x5AEB);
+  frameBuffer.fillRect(244, 40, 2, 67, 0x5AEB);
   frameBuffer.fillRect(16, 39, 56, 43, 0x10E3);
   frameBuffer.drawRect(16, 39, 56, 43, deskEdge);
   frameBuffer.drawFastVLine(44, 40, 41, deskEdge);
   frameBuffer.drawFastHLine(17, 60, 54, deskEdge);
+  frameBuffer.fillRect(19, 43, 21, 15, 0x39E7);
+  frameBuffer.fillRect(47, 43, 18, 15, 0x2128);
+  frameBuffer.fillRect(21, 46, 6, 6, 0xBDF7);
+  frameBuffer.fillRect(29, 46, 8, 6, 0x5E9F);
+  frameBuffer.fillRect(49, 46, 14, 3, 0x07E0);
+  frameBuffer.fillRect(49, 51, 10, 3, 0xF800);
+  frameBuffer.fillRect(18, 64, 50, 14, 0x1082);
+  for (int16_t x = 22; x < 66; x += 9) {
+    frameBuffer.fillRect(x, 68 + (x % 3), 5, 7, 0x7BEF);
+  }
   frameBuffer.fillRect(79, 39, 162, 43, 0x2128);
   frameBuffer.drawRect(79, 39, 162, 43, deskEdge);
+  frameBuffer.fillRect(83, 43, 154, 34, 0x0841);
+  frameBuffer.drawFastHLine(88, 47, 143, 0x39E7);
+  frameBuffer.drawFastHLine(88, 73, 143, 0x39E7);
+  for (int16_t x = 91; x < 232; x += 18) {
+    frameBuffer.drawFastVLine(x, 49, 22, 0x2124);
+    frameBuffer.fillRect(x + 4, 53, 7, 5, (x % 3 == 0) ? 0x07E0 : 0xFFE0);
+    frameBuffer.fillRect(x + 4, 62, 11, 3, (x % 2 == 0) ? 0xF800 : 0x001F);
+    frameBuffer.drawFastHLine(x + 3, 69, 12, 0x7BEF);
+  }
   frameBuffer.setTextColor(TFT_WHITE);
   frameBuffer.setTextSize(1);
   frameBuffer.setCursor(114, 48);
@@ -750,26 +824,32 @@ void drawPoliceStation(uint32_t now) {
 
   frameBuffer.fillRect(251, 38, 53, 57, wallShadow);
   frameBuffer.fillRect(257, 45, 41, 49, 0x3186);
-  frameBuffer.fillRect(266, 53, 25, 25, 0x52AA);
-  frameBuffer.drawRect(266, 53, 25, 25, deskEdge);
-  frameBuffer.fillRect(278, 79, 3, 4, badgeGold);
+  frameBuffer.fillRect(261, 48, 33, 5, 0xBDF7);
+  frameBuffer.fillRect(262, 55, 31, 34, 0x1082);
+  frameBuffer.fillRect(266, 58, 11, 12, 0xFEA0);
+  frameBuffer.fillRect(280, 58, 9, 12, 0xFEA0);
+  frameBuffer.fillRect(266, 74, 23, 3, 0x7BEF);
+  frameBuffer.fillRect(266, 80, 18, 3, 0x7BEF);
+  frameBuffer.drawRect(257, 45, 41, 49, deskEdge);
+  frameBuffer.fillRect(278, 89, 3, 4, badgeGold);
   frameBuffer.fillRect(10, 87, 55, 15, wallShadow);
   frameBuffer.fillRect(14, 90, 47, 4, 0xA514);
   frameBuffer.fillRect(14, 96, 34, 3, 0xD69A);
   frameBuffer.fillRect(6, 107, 51, 5, 0x39E7);
-  frameBuffer.drawFastHLine(0, 122, frameBuffer.width(), 0x4208);
+  frameBuffer.fillRect(6, 112, 51, 2, 0x7BEF);
 
-  frameBuffer.fillRect(0, floorY, frameBuffer.width(),
-                       frameBuffer.height() - floorY, 0x2104);
-  frameBuffer.fillTriangle(0, floorY, frameBuffer.width() / 2, 130,
-                           frameBuffer.width(), floorY, 0x39E7);
-  for (int16_t x = 0; x < frameBuffer.width(); x += 40) {
-    frameBuffer.drawLine(x, frameBuffer.height() - 1,
-                         frameBuffer.width() / 2, floorY, 0x3186);
+  drawPerspectiveFloor(floorY, frameBuffer.height(), frameBuffer.width() / 2,
+                      0x5AEB, 0x39C7, 17);
+  frameBuffer.fillTriangle(0, floorY, frameBuffer.width() / 2, floorY + 14,
+                           frameBuffer.width(), floorY, 0x4208);
+  for (int16_t x = 10; x < frameBuffer.width(); x += 61) {
+    frameBuffer.fillRect(x, 125, 28, 3, 0xBDF7);
+    frameBuffer.drawFastHLine(x + 4, 129, 20, 0x39C7);
   }
-  for (int16_t y = 151; y < frameBuffer.height(); y += 27) {
-    frameBuffer.drawFastHLine(0, y, frameBuffer.width(), 0x3186);
-    frameBuffer.drawFastHLine(5, y + 1, frameBuffer.width() - 10, 0x2945);
+  frameBuffer.fillRect(4, 194, 29, 7, 0x1082);
+  frameBuffer.drawRect(4, 194, 29, 7, 0x7BEF);
+  for (int16_t x = 8; x < 31; x += 6) {
+    frameBuffer.drawFastVLine(x, 196, 3, 0x5AEB);
   }
 
   drawDesk(POLICE_LANE_X[0], 125, 61, 27);
@@ -782,130 +862,297 @@ void drawPoliceStation(uint32_t now) {
 }
 
 void drawAlley() {
-  frameBuffer.fillScreen(0x10A3);
-  frameBuffer.fillRect(0, 25, frameBuffer.width(), 92, 0x2128);
-  frameBuffer.fillRect(0, 25, 72, 112, 0x4208);
-  frameBuffer.fillRect(247, 25, 73, 112, 0x3186);
-  for (int16_t y = 37; y < 139; y += 14) {
-    frameBuffer.drawFastHLine(0, y, 71, 0x5AEB);
-    frameBuffer.drawFastHLine(248, y, 72, 0x4A49);
-    const int16_t offset = (y / 14) % 2 == 0 ? 0 : 17;
-    for (int16_t x = offset; x < 72; x += 34) {
-      frameBuffer.drawFastVLine(x, y, 14, 0x5AEB);
-    }
-    for (int16_t x = 247 + offset; x < 320; x += 34) {
-      frameBuffer.drawFastVLine(x, y, 14, 0x4A49);
-    }
+  frameBuffer.fillScreen(0x0843);
+  frameBuffer.fillRect(0, 25, frameBuffer.width(), 92, 0x0210);
+  for (int16_t x = 15; x < frameBuffer.width(); x += 43) {
+    frameBuffer.fillCircle(x, 43 + (x * 3 % 29), 1, 0x7BEF);
   }
-  for (int16_t y = 42; y < 105; y += 27) {
-    frameBuffer.fillRect(13, y, 21, 12, 0xFEA0);
-    frameBuffer.fillRect(271, y, 28, 12, 0xFEA0);
+  frameBuffer.fillCircle(187, 46, 10, 0xD69A);
+  frameBuffer.fillCircle(191, 42, 9, 0x0210);
+  frameBuffer.fillRect(0, 25, 71, 118, 0x39A6);
+  frameBuffer.fillRect(249, 25, 71, 118, 0x2945);
+  frameBuffer.fillRect(0, 25, 71, 10, 0x2124);
+  frameBuffer.fillRect(249, 25, 71, 10, 0x2124);
+  frameBuffer.drawFastHLine(0, 36, 71, 0x7BEF);
+  frameBuffer.drawFastHLine(249, 36, 71, 0x7BEF);
+  drawBrickPattern(0, 39, 72, 137, 27, 14, 0x5AEB);
+  drawBrickPattern(248, 39, 320, 137, 31, 15, 0x4A49);
+  for (int16_t x = 9; x < 70; x += 28) {
+    frameBuffer.fillRect(x, 39, 3, 97, 0x2124);
+    frameBuffer.drawFastVLine(x + 3, 39, 97, 0x7BEF);
   }
+  for (int16_t y = 47; y < 120; y += 27) {
+    frameBuffer.fillRect(12, y, 25, 16, 0x0841);
+    frameBuffer.fillRect(15, y + 3, 19, 10, (y % 2 == 0) ? 0xFEA0 : 0xFDC0);
+    frameBuffer.fillRect(17, y + 4, 3, 8, 0xFFFF);
+    frameBuffer.drawRect(12, y, 25, 16, 0x7BEF);
+    frameBuffer.fillRect(273, y - 3, 32, 20, 0x0841);
+    frameBuffer.fillRect(277, y + 1, 24, 12, (y % 2 == 0) ? 0xFEA0 : 0xFDC0);
+    frameBuffer.fillRect(281, y + 2, 4, 10, 0xFFFF);
+    frameBuffer.drawRect(273, y - 3, 32, 20, 0x7BEF);
+  }
+  frameBuffer.drawFastHLine(0, 119, 72, 0xBDF7);
+  frameBuffer.drawFastHLine(248, 119, 72, 0x9CF3);
+  frameBuffer.fillRect(7, 125, 5, 16, 0x5AEB);
+  frameBuffer.fillRect(12, 125, 3, 16, 0x7BEF);
+  frameBuffer.fillRect(302, 120, 4, 23, 0x7BEF);
+  frameBuffer.fillRect(306, 120, 3, 23, 0x4208);
+  frameBuffer.drawLine(0, 62, 158, 52, 0x0841);
+  frameBuffer.drawLine(163, 52, 320, 64, 0x0841);
+  frameBuffer.drawLine(0, 66, 158, 56, 0x7BEF);
+  frameBuffer.drawLine(163, 56, 320, 68, 0x5AEB);
+  frameBuffer.fillRect(155, 50, 10, 14, 0x2124);
+  frameBuffer.fillRect(157, 51, 6, 3, TFT_YELLOW);
   frameBuffer.fillRect(80, 63, 39, 51, 0x18E3);
   frameBuffer.drawRect(80, 63, 39, 51, 0x8410);
   frameBuffer.fillRect(200, 55, 34, 59, 0x1082);
   frameBuffer.drawRect(200, 55, 34, 59, 0x5AEB);
-  frameBuffer.fillRect(0, 115, frameBuffer.width(),
-                       frameBuffer.height() - 115, 0x2945);
-  frameBuffer.fillEllipse(151, 191, 27, 6, 0x1082);
-  frameBuffer.drawEllipse(151, 191, 27, 6, 0x5AEB);
-  frameBuffer.drawFastVLine(151, 186, 10, 0x5AEB);
-  for (int16_t x = 0; x <= frameBuffer.width(); x += 40) {
-    frameBuffer.drawLine(x, frameBuffer.height() - 1,
-                         frameBuffer.width() / 2, 116, 0x4A49);
+  for (int16_t y = 70; y < 108; y += 12) {
+    frameBuffer.drawFastHLine(84, y, 30, 0x39E7);
+    frameBuffer.drawFastHLine(204, y, 26, 0x2945);
   }
-  frameBuffer.fillRect(15, 166, 31, 28, 0x3186);
-  frameBuffer.fillRect(19, 158, 23, 10, 0x4A49);
-  frameBuffer.drawRect(15, 166, 31, 28, 0x7BEF);
-  frameBuffer.fillRect(270, 153, 32, 38, 0x4208);
-  frameBuffer.fillRect(267, 147, 38, 8, 0x5AEB);
+  frameBuffer.fillRect(123, 91, 25, 23, 0x2124);
+  frameBuffer.fillRect(126, 94, 19, 20, 0x5AEB);
+  frameBuffer.drawRect(123, 91, 25, 23, 0x7BEF);
+  frameBuffer.fillRect(128, 99, 14, 12, 0x1082);
+  frameBuffer.fillRect(148, 102, 24, 13, 0x0010);
+  frameBuffer.fillRect(173, 95, 24, 19, 0x3186);
+  frameBuffer.drawRect(173, 95, 24, 19, 0x7BEF);
+
+  drawPerspectiveFloor(116, frameBuffer.height(), frameBuffer.width() / 2,
+                      0x2104, 0x3186, 20);
+  frameBuffer.drawLine(35, 178, 49, 170, 0x4208);
+  frameBuffer.drawLine(49, 170, 56, 174, 0x4208);
+  frameBuffer.drawLine(232, 204, 247, 197, 0x4208);
+  frameBuffer.drawLine(247, 197, 257, 201, 0x4208);
+  frameBuffer.fillTriangle(0, 116, frameBuffer.width() / 2, 105,
+                           frameBuffer.width(), 116, 0x3186);
+  frameBuffer.fillEllipse(151, 191, 31, 8, 0x0841);
+  frameBuffer.drawEllipse(151, 191, 31, 8, 0x7BEF);
+  frameBuffer.drawFastVLine(151, 184, 14, 0x9CF3);
+  frameBuffer.drawFastHLine(125, 191, 53, 0x5AEB);
+  frameBuffer.fillRect(17, 167, 27, 28, 0x3186);
+  frameBuffer.drawRect(17, 167, 27, 28, 0x7BEF);
+  frameBuffer.fillRect(20, 160, 21, 8, 0x4A49);
+  frameBuffer.drawFastHLine(15, 165, 31, 0xBDF7);
+  frameBuffer.fillRect(267, 153, 38, 43, 0x4208);
+  frameBuffer.fillRect(264, 148, 44, 7, 0x5AEB);
+  frameBuffer.drawRect(267, 153, 38, 43, 0x7BEF);
+  frameBuffer.fillRect(271, 159, 30, 5, 0x2945);
+  frameBuffer.fillRect(275, 169, 4, 21, 0x7BEF);
+  frameBuffer.fillRect(289, 169, 4, 21, 0x7BEF);
+  frameBuffer.fillCircle(52, 204, 10, 0x2104);
+  frameBuffer.fillCircle(66, 208, 7, 0x3186);
+  frameBuffer.fillCircle(267, 211, 12, 0x2104);
+  frameBuffer.fillCircle(281, 206, 8, 0x3186);
+
 }
 
 void drawBallroom() {
-  frameBuffer.fillScreen(0x5AEB);
-  frameBuffer.fillRect(0, 25, frameBuffer.width(), 98, 0x7BEF);
-  frameBuffer.fillRect(0, 25, frameBuffer.width(), 10, 0xD69A);
-  frameBuffer.fillRect(0, 35, frameBuffer.width(), 5, 0xA514);
-  frameBuffer.fillRect(0, 115, frameBuffer.width(), 8, 0xD69A);
+  frameBuffer.fillScreen(0x2128);
+  frameBuffer.fillRect(0, 25, frameBuffer.width(), 95, 0x8410);
+  frameBuffer.fillRect(0, 25, frameBuffer.width(), 11, 0xD69A);
+  frameBuffer.fillRect(0, 36, frameBuffer.width(), 4, 0xA514);
+  frameBuffer.fillRect(0, 40, frameBuffer.width(), 5, 0xFDC0);
+  frameBuffer.fillRect(0, 45, frameBuffer.width(), 68, 0x7BEF);
   for (int16_t x = 0; x < frameBuffer.width(); x += 32) {
-    frameBuffer.drawFastVLine(x, 42, 65, 0x6B4D);
-    frameBuffer.drawFastVLine(x + 2, 43, 63, 0x9CF3);
+    frameBuffer.fillRect(x, 44, 2, 69, 0x6B4D);
+    frameBuffer.fillRect(x + 3, 45, 1, 67, 0xBDF7);
+    frameBuffer.fillRect(x + 7, 46, 1, 65, 0x9CF3);
   }
-  frameBuffer.fillTriangle(0, 123, frameBuffer.width() / 2, 88,
-                           frameBuffer.width(), 123, 0x39E7);
-  frameBuffer.fillRect(0, 123, frameBuffer.width(),
-                       frameBuffer.height() - 123, 0x6B4D);
-  frameBuffer.fillTriangle(98, 123, frameBuffer.width() / 2, 123,
-                           233, frameBuffer.height(), 0xA514);
   for (int16_t x : {18, 82, 238, 302}) {
-    frameBuffer.fillRect(x, 43, 18, 104, 0xD69A);
-    frameBuffer.fillTriangle(x - 5, 48, x + 9, 29, x + 23, 48, 0xFEA0);
-    frameBuffer.fillRect(x - 3, 140, 24, 8, 0xFEA0);
+    frameBuffer.fillRect(x - 5, 47, 27, 73, 0xD69A);
+    frameBuffer.fillRect(x - 1, 50, 19, 67, 0xFEA0);
+    frameBuffer.fillRect(x + 2, 51, 4, 63, 0xFFE0);
+    frameBuffer.fillTriangle(x - 8, 50, x + 8, 29, x + 25, 50, 0xFEA0);
+    frameBuffer.fillTriangle(x - 4, 46, x + 8, 33, x + 20, 46, 0xFFE0);
+    frameBuffer.fillRect(x - 8, 117, 33, 7, 0xD69A);
+    frameBuffer.fillRect(x - 4, 119, 25, 3, 0xFEA0);
+    frameBuffer.drawFastVLine(x - 2, 53, 59, 0xBDF7);
   }
-  frameBuffer.drawLine(147, 25, 147, 51, deskEdge);
-  frameBuffer.drawLine(173, 25, 173, 51, deskEdge);
-  frameBuffer.fillCircle(160, 62, 12, 0xFEA0);
+  frameBuffer.fillRect(0, 111, frameBuffer.width(), 9, 0xA514);
+  frameBuffer.drawFastHLine(0, 111, frameBuffer.width(), 0xFFE0);
+  frameBuffer.drawFastHLine(0, 117, frameBuffer.width(), 0xFDC0);
+  frameBuffer.fillTriangle(0, 124, frameBuffer.width() / 2, 88,
+                           frameBuffer.width(), 124, 0x39E7);
+  frameBuffer.fillRect(0, 123, frameBuffer.width(), 6, 0xD69A);
+  drawWoodFloor(128, 0x8A43, 0x5A20, 15);
+  frameBuffer.fillTriangle(0, 129, frameBuffer.width() / 2, 120,
+                           frameBuffer.width(), 129, 0xFDC0);
+  frameBuffer.fillTriangle(95, 130, frameBuffer.width() / 2, 125,
+                           225, frameBuffer.height(), 0xA514);
+  frameBuffer.drawLine(96, 130, 150, frameBuffer.height(), 0xD69A);
+  frameBuffer.drawLine(224, 130, 170, frameBuffer.height(), 0xD69A);
+  for (int16_t x = 22; x < 304; x += 39) {
+    frameBuffer.fillRect(x, 143 + x % 9, 17, 2, 0xD69A);
+    frameBuffer.fillRect(x + 4, 158 + x % 7, 10, 2, 0x9CF3);
+    frameBuffer.fillRect(x - 3, 185 + x % 11, 22, 2, 0xD69A);
+  }
+  frameBuffer.fillRoundRect(118, 91, 84, 25, 3, 0x4208);
+  frameBuffer.drawRoundRect(118, 91, 84, 25, 3, badgeGold);
+  frameBuffer.fillRect(126, 96, 68, 14, 0x8000);
+  frameBuffer.fillTriangle(132, 104, 142, 97, 152, 104, 0xFEA0);
+  frameBuffer.fillRect(158, 98, 26, 3, 0xFFE0);
+  frameBuffer.fillRect(158, 104, 21, 2, 0xFDC0);
+  frameBuffer.fillRect(126, 111, 68, 3, 0xD69A);
+  frameBuffer.drawLine(147, 25, 147, 50, deskEdge);
+  frameBuffer.drawLine(173, 25, 173, 50, deskEdge);
+  frameBuffer.fillCircle(160, 62, 13, 0xD69A);
+  frameBuffer.fillCircle(160, 62, 9, 0xFEA0);
   frameBuffer.fillCircle(145, 55, 5, TFT_YELLOW);
   frameBuffer.fillCircle(175, 55, 5, TFT_YELLOW);
   frameBuffer.fillCircle(160, 45, 5, TFT_YELLOW);
+  frameBuffer.fillTriangle(147, 64, 160, 85, 173, 64, 0xFEA0);
+  for (int8_t ray = -2; ray <= 2; ++ray) {
+    frameBuffer.drawLine(160, 72, 160 + ray * 13, 110,
+                         (ray % 2 == 0) ? 0xFDC0 : 0xFFE0);
+  }
 }
 
 void drawBackyard() {
-  frameBuffer.fillScreen(0x0843);
-  frameBuffer.fillRect(0, 25, frameBuffer.width(), 105, 0x10A3);
-  frameBuffer.fillCircle(274, 57, 19, 0xFFDF);
-  frameBuffer.fillCircle(281, 51, 19, 0x10A3);
-  frameBuffer.fillRect(0, 100, frameBuffer.width(), 49, 0x31A6);
-  for (int16_t x = 0; x < frameBuffer.width(); x += 24) {
-    frameBuffer.fillRect(x, 104, 6, 46, 0x7BEF);
+  frameBuffer.fillScreen(0x0010);
+  frameBuffer.fillRect(0, 25, frameBuffer.width(), 110, 0x0843);
+  for (int16_t x = 12; x < frameBuffer.width(); x += 37) {
+    frameBuffer.fillCircle(x, 42 + (x * 3 % 45), 1, 0xBDF7);
+    frameBuffer.fillCircle(x + 8, 56 + (x * 5 % 39), 1, 0x7BEF);
   }
-  frameBuffer.fillRect(0, 119, frameBuffer.width(), 6, 0x9CF3);
-  frameBuffer.fillRect(0, 142, frameBuffer.width(), 6, 0x9CF3);
-  frameBuffer.fillRect(0, 149, frameBuffer.width(),
-                       frameBuffer.height() - 149, 0x1A64);
+  frameBuffer.fillCircle(274, 57, 21, 0xFFDF);
+  frameBuffer.fillCircle(281, 51, 20, 0x0843);
+  frameBuffer.drawFastHLine(260, 58, 5, 0xFEA0);
+  frameBuffer.fillRect(0, 90, frameBuffer.width(), 47, 0x4208);
+  frameBuffer.fillRect(0, 88, frameBuffer.width(), 5, 0x5AEB);
+  frameBuffer.fillTriangle(0, 75, 61, 40, 123, 75, 0x2124);
+  frameBuffer.fillRect(11, 74, 100, 48, 0x4208);
+  frameBuffer.fillTriangle(192, 81, 247, 48, 310, 81, 0x3186);
+  frameBuffer.fillRect(203, 78, 99, 48, 0x2124);
+  frameBuffer.fillRect(224, 93, 17, 25, 0x0841);
+  frameBuffer.fillRect(246, 92, 20, 20, 0x10A3);
+  frameBuffer.fillRect(249, 95, 14, 14, 0xFEA0);
+  frameBuffer.fillRect(39, 88, 29, 25, 0x0010);
+  frameBuffer.fillRect(43, 91, 21, 19, 0xFEA0);
+  frameBuffer.drawRect(39, 88, 29, 25, 0x7BEF);
+  frameBuffer.fillRect(48, 92, 3, 15, 0x4208);
+  frameBuffer.fillRect(0, 125, frameBuffer.width(), 26, 0x5AEB);
+  frameBuffer.fillRect(0, 132, frameBuffer.width(), 14, 0x39E7);
+  for (int16_t x = 0; x < frameBuffer.width(); x += 24) {
+    frameBuffer.fillRect(x, 99, 5, 51, 0x7BEF);
+    frameBuffer.fillRect(x + 6, 101, 2, 49, 0xBDF7);
+    frameBuffer.fillTriangle(x, 101, x + 8, 101, x + 4, 95, 0x9CF3);
+  }
+  frameBuffer.fillRect(0, 119, frameBuffer.width(), 5, 0xD69A);
+  frameBuffer.fillRect(0, 142, frameBuffer.width(), 5, 0xD69A);
+  frameBuffer.fillRect(0, 147, frameBuffer.width(),
+                       frameBuffer.height() - 147, 0x1A64);
   frameBuffer.fillRect(0, 150, frameBuffer.width(), 3, 0x2E85);
   for (int16_t x = 0; x < frameBuffer.width(); x += 31) {
-    frameBuffer.drawFastHLine(x, 169 + (x % 3) * 13, 14, 0x2E85);
+    frameBuffer.drawFastHLine(x, 166 + (x % 3) * 13, 14, 0x2E85);
     frameBuffer.fillTriangle(x, 148, x + 14, 148, x + 7, 158, 0x07E0);
+    frameBuffer.fillTriangle(x + 2, 148, x + 6, 139, x + 10, 148, 0x2D68);
+  }
+  for (int16_t x = 8; x < frameBuffer.width(); x += 27) {
+    frameBuffer.drawFastVLine(x, 174 + x % 27, 4 + x % 4, 0x2D68);
+    frameBuffer.drawFastVLine(x + 3, 186 + x % 17, 3 + x % 3, 0x07E0);
+  }
+  frameBuffer.fillTriangle(103, 148, 159, 133, 217, 148, 0x7BEF);
+  frameBuffer.fillRect(116, 146, 88, 5, 0x9CF3);
+  for (int16_t x = 122; x < 200; x += 15) {
+    frameBuffer.fillRect(x, 137 + x % 6, 4, 10, 0x4208);
   }
   frameBuffer.fillRect(21, 177, 42, 32, 0xA514);
   frameBuffer.drawRect(21, 177, 42, 32, 0xFEA0);
+  frameBuffer.fillRect(25, 181, 12, 11, 0x1082);
+  frameBuffer.fillRect(40, 181, 18, 4, 0xD69A);
+  frameBuffer.fillRect(40, 188, 15, 3, 0x7BEF);
   frameBuffer.fillRect(263, 168, 35, 42, 0x8A43);
   frameBuffer.drawRect(263, 168, 35, 42, 0xD69A);
+  frameBuffer.fillRect(268, 173, 25, 8, 0xD69A);
+  frameBuffer.fillRect(268, 185, 25, 19, 0x5AEB);
+  frameBuffer.fillRect(273, 189, 15, 11, 0x1082);
+  frameBuffer.fillRect(0, 213, 320, 3, 0x2E85);
+  for (int16_t x = 6; x < frameBuffer.width(); x += 19) {
+    frameBuffer.drawFastVLine(x, 208 - x % 7, 7 + x % 7, 0x07E0);
+  }
 }
 
 void drawTavern() {
-  frameBuffer.fillScreen(0x2945);
-  frameBuffer.fillRect(0, 25, frameBuffer.width(), 99, 0x4208);
-  for (int16_t y = 35; y < 111; y += 19) {
-    frameBuffer.drawFastHLine(0, y, frameBuffer.width(), 0x5AEB);
-    for (int16_t x = (y % 2) * 22; x < frameBuffer.width(); x += 44) {
-      frameBuffer.drawFastVLine(x, y, 19, 0x5AEB);
-    }
+  frameBuffer.fillScreen(0x1082);
+  frameBuffer.fillRect(0, 25, frameBuffer.width(), 101, 0x39A6);
+  frameBuffer.fillRect(0, 25, frameBuffer.width(), 9, 0x2124);
+  frameBuffer.fillRect(0, 34, frameBuffer.width(), 4, 0xA514);
+  drawBrickPattern(0, 39, frameBuffer.width(), 107, 31, 18, 0x5AEB);
+  for (int16_t x = 13; x < frameBuffer.width(); x += 54) {
+    frameBuffer.fillRect(x, 42, 4, 62, 0x2124);
+    frameBuffer.drawFastVLine(x + 4, 42, 62, 0x7BEF);
   }
-  frameBuffer.fillRect(26, 44, 110, 33, 0x1082);
-  frameBuffer.drawRect(26, 44, 110, 33, 0xFEA0);
-  frameBuffer.setTextColor(TFT_ORANGE);
-  frameBuffer.setTextSize(2);
-  frameBuffer.setCursor(44, 52);
-  frameBuffer.print("TAVERN");
-  for (int16_t x : {159, 197, 235}) {
-    frameBuffer.fillRect(x, 42, 31, 4, deskEdge);
-    frameBuffer.fillRect(x + 3, 46, 25, 2, 0xA514);
+  frameBuffer.fillRect(19, 42, 124, 40, 0x4208);
+  frameBuffer.fillRect(23, 46, 116, 32, 0x1082);
+  frameBuffer.drawRect(19, 42, 124, 40, 0xFEA0);
+  frameBuffer.drawRect(22, 45, 118, 34, 0xD69A);
+  frameBuffer.fillRect(27, 50, 108, 3, 0xFEA0);
+  frameBuffer.fillRect(27, 72, 108, 3, 0xFEA0);
+  frameBuffer.fillRect(30, 56, 17, 11, 0x0010);
+  frameBuffer.fillRect(51, 56, 17, 11, 0x0010);
+  frameBuffer.fillRect(72, 56, 17, 11, 0x0010);
+  frameBuffer.fillRect(93, 56, 17, 11, 0x0010);
+  frameBuffer.fillRect(114, 56, 17, 11, 0x0010);
+  frameBuffer.fillRect(31, 57, 14, 8, 0xFEA0);
+  frameBuffer.fillRect(52, 57, 14, 8, 0xF800);
+  frameBuffer.fillRect(73, 57, 14, 8, 0xFFE0);
+  frameBuffer.fillRect(94, 57, 14, 8, 0x001F);
+  frameBuffer.fillRect(115, 57, 14, 8, 0x07E0);
+  for (int16_t x = 158; x < 307; x += 38) {
+    frameBuffer.fillRect(x, 43, 31, 4, 0xD69A);
+    frameBuffer.fillRect(x + 3, 47, 25, 2, 0xA514);
+    frameBuffer.fillRect(x + 5, 49, 21, 5, 0x0841);
+    frameBuffer.fillRect(x + 7, 50, 17, 3, 0xFEA0);
+    frameBuffer.drawFastVLine(x + 2, 42, 13, 0x7BEF);
   }
-  frameBuffer.fillRect(0, 108, frameBuffer.width(), 18, 0x7A20);
-  frameBuffer.drawFastHLine(0, 108, frameBuffer.width(), 0xFEA0);
-  frameBuffer.drawFastHLine(0, 114, frameBuffer.width(), 0xA514);
-  frameBuffer.fillRect(14, 81, 292, 3, 0xD69A);
-  frameBuffer.fillRect(17, 86, 286, 4, 0x7A20);
+  frameBuffer.fillRect(11, 87, 298, 3, 0xD69A);
+  frameBuffer.fillRect(15, 91, 290, 3, 0xA514);
+  for (int16_t x = 19; x < 304; x += 28) {
+    frameBuffer.fillRect(x, 95, 6, 10, 0x1082);
+    frameBuffer.fillRect(x + 2, 97, 2, 6, 0x5AEB);
+  }
+  frameBuffer.fillRect(0, 105, frameBuffer.width(), 22, 0x7A20);
+  frameBuffer.drawFastHLine(0, 105, frameBuffer.width(), 0xFEA0);
+  frameBuffer.drawFastHLine(0, 111, frameBuffer.width(), 0xD69A);
+  frameBuffer.drawFastHLine(0, 121, frameBuffer.width(), 0xA514);
   frameBuffer.fillRect(0, 126, frameBuffer.width(),
-                       frameBuffer.height() - 126, 0x2104);
+                       frameBuffer.height() - 126, 0x5A20);
+  drawWoodFloor(128, 0x5A20, 0x4208, 13);
+  for (int16_t x = 17; x < frameBuffer.width(); x += 37) {
+    frameBuffer.fillRect(x, 137 + x % 9, 19, 2, 0xD69A);
+    frameBuffer.fillRect(x + 8, 163 + x % 11, 11, 2, 0x7A20);
+    frameBuffer.fillRect(x - 4, 194 + x % 13, 26, 2, 0xA514);
+  }
+  frameBuffer.fillRect(0, 25, 10, 101, 0x2124);
+  frameBuffer.fillRect(310, 25, 10, 101, 0x2124);
+  frameBuffer.fillRect(15, 108, 292, 3, 0xD69A);
+  frameBuffer.fillRect(17, 113, 286, 3, 0x7A20);
+  frameBuffer.fillRect(0, 126, frameBuffer.width(), 4, 0xA514);
   for (int16_t x : {47, 160, 273}) {
     frameBuffer.fillRect(x - 20, 146, 40, 8, 0xA514);
     frameBuffer.fillRect(x - 15, 154, 30, 30, 0x7A20);
     frameBuffer.fillRect(x - 12, 184, 5, 26, wallShadow);
     frameBuffer.fillRect(x + 7, 184, 5, 26, wallShadow);
   }
+  frameBuffer.fillRect(34, 31, 4, 13, 0x2124);
+  frameBuffer.fillRect(160, 25, 3, 24, 0x5AEB);
+  frameBuffer.fillEllipse(161, 52, 18, 6, 0xA514);
+  frameBuffer.fillEllipse(161, 50, 14, 4, 0xFEA0);
+  frameBuffer.fillCircle(151, 57, 3, TFT_YELLOW);
+  frameBuffer.fillCircle(161, 59, 3, TFT_YELLOW);
+  frameBuffer.fillCircle(171, 57, 3, TFT_YELLOW);
+  frameBuffer.fillTriangle(148, 54, 174, 54, 161, 75, 0xFDC0);
+  frameBuffer.drawFastVLine(161, 65, 19, 0xFEA0);
+  frameBuffer.fillCircle(161, 84, 2, TFT_YELLOW);
+
+  frameBuffer.fillRoundRect(26, 42, 110, 33, 3, 0x1082);
+  frameBuffer.drawRoundRect(26, 42, 110, 33, 3, 0xFEA0);
+  frameBuffer.setTextColor(TFT_ORANGE);
+  frameBuffer.setTextSize(2);
+  frameBuffer.setCursor(44, 52);
+  frameBuffer.print("TAVERN");
 }
 
 void drawCurrentScene(uint32_t now) {
@@ -1597,18 +1844,29 @@ void drawZombie(const Zombie &zombie, uint32_t now) {
   frameBuffer.drawFastHLine(x - radius / 3, y - radius / 2,
                             max<int16_t>(3, radius * 2 / 3), woundRed);
   if (zombie.kind == ZombieKind::Boss) {
-    const int16_t barWidth = 40;
+    const int16_t barWidth = 42;
     const int16_t barX = x - barWidth / 2;
     const int16_t barY = y + radius + 11;
-    frameBuffer.fillRect(barX, barY, barWidth, 5, wallShadow);
+    frameBuffer.setTextColor(TFT_WHITE);
+    frameBuffer.setTextSize(1);
+    frameBuffer.setCursor(barX - 15, barY);
+    frameBuffer.print("H");
+    frameBuffer.fillRect(barX, barY, barWidth, 4, wallShadow);
     frameBuffer.fillRect(barX, barY,
+                         barWidth * (BOSS_HEAD_HITS - zombie.headHits) /
+                             BOSS_HEAD_HITS,
+                         4, TFT_CYAN);
+    frameBuffer.drawRect(barX, barY, barWidth, 4, TFT_WHITE);
+    frameBuffer.setCursor(barX - 15, barY + 7);
+    frameBuffer.print("T");
+    frameBuffer.fillRect(barX, barY + 7, barWidth, 4, wallShadow);
+    frameBuffer.fillRect(barX, barY + 7,
                          barWidth * (zombieTorsoHealth(zombie.kind) -
                                      zombie.torsoHits) /
                              zombieTorsoHealth(zombie.kind),
-                         5, TFT_RED);
-    frameBuffer.drawRect(barX, barY, barWidth, 5, TFT_WHITE);
+                         4, TFT_RED);
+    frameBuffer.drawRect(barX, barY + 7, barWidth, 4, TFT_WHITE);
     frameBuffer.setTextColor(TFT_YELLOW);
-    frameBuffer.setTextSize(1);
     frameBuffer.setCursor(x - 12, barY - 10);
     frameBuffer.print("BOSS");
   }
@@ -2170,6 +2428,7 @@ void spawnZombie(uint32_t now) {
                          : ZOMBIE_EMERGE_MS + random(650, 1801))
             : UINT32_MAX;
     zombie.torsoHits = 0;
+    zombie.headHits = 0;
     zombie.hasHat = zombie.kind == ZombieKind::Police;
     zombie.active = true;
     return;
@@ -2188,6 +2447,7 @@ void spawnBoss(uint32_t now) {
     zombie.spawnedAt = now;
     zombie.nextShotAt = now + 2200;
     zombie.torsoHits = 0;
+    zombie.headHits = 0;
     zombie.animation = ZombieAnimation::Reach;
     zombie.kind = ZombieKind::Boss;
     zombie.hasHat = false;
@@ -2381,7 +2641,24 @@ void shootAt(int16_t x, int16_t y) {
       continue;
     }
 
-    if (zombie.kind == ZombieKind::Boss) {
+    const int16_t headDx = x - static_cast<int16_t>(zombie.x);
+    const int16_t headDy = y - headY;
+    const int16_t headshotRadius = radius / 2 + 7;
+    const bool headshot =
+        headDx * headDx + headDy * headDy <= headshotRadius * headshotRadius;
+    const int16_t impactX = static_cast<int16_t>(zombie.x);
+    const int16_t impactY = headshot ? headY : static_cast<int16_t>(zombie.y);
+
+    if (zombie.kind == ZombieKind::Boss && headshot) {
+      ++zombie.headHits;
+      ++zombieShotsHit;
+      ++headshotCount;
+      if (zombie.headHits < BOSS_HEAD_HITS) {
+        addHitEffect(impactX, impactY, true, millis());
+        playTone(1680, 115);
+        return;
+      }
+    } else if (zombie.kind == ZombieKind::Boss) {
       const bool weakPointOpen =
           (age % BOSS_WEAKPOINT_CYCLE_MS) < BOSS_WEAKPOINT_OPEN_MS;
       const int16_t weakDx = x - static_cast<int16_t>(zombie.x);
@@ -2393,21 +2670,14 @@ void shootAt(int16_t x, int16_t y) {
       }
       ++zombie.torsoHits;
       ++zombieShotsHit;
-      addHitEffect(static_cast<int16_t>(zombie.x),
-                   static_cast<int16_t>(zombie.y), false, millis());
       if (zombie.torsoHits < zombieTorsoHealth(zombie.kind)) {
+        addHitEffect(static_cast<int16_t>(zombie.x),
+                     static_cast<int16_t>(zombie.y), false, millis());
         playTone(840, 75);
         return;
       }
     }
 
-    const int16_t headDx = x - static_cast<int16_t>(zombie.x);
-    const int16_t headDy = y - headY;
-    const int16_t headshotRadius = radius / 2 + 7;
-    const bool headshot =
-        headDx * headDx + headDy * headDy <= headshotRadius * headshotRadius;
-    const int16_t impactX = static_cast<int16_t>(zombie.x);
-    const int16_t impactY = headshot ? headY : static_cast<int16_t>(zombie.y);
     if (zombie.kind != ZombieKind::Boss && !headshot) {
       ++zombie.torsoHits;
       ++zombieShotsHit;
@@ -2425,7 +2695,7 @@ void shootAt(int16_t x, int16_t y) {
     }
 
     addHitEffect(impactX, impactY,
-                 headshot && zombie.kind != ZombieKind::Boss, millis());
+                 headshot, millis());
     playTone(headshot ? 1680 : 470, headshot ? 115 : 85);
     zombie.active = false;
     ++totalKills;

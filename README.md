@@ -28,8 +28,9 @@ score.
   the police-zombie share of spawns, and officers can shoot after one second.
 - Brutes take five body hits and move slowly; runners move quickly, while
   peekers briefly watch from windows before moving into a lane.
-- Every scene ends with a boss. Its chest weak point opens and closes; hit the
-  glowing weak point six times to defeat it. Each scene takes 20 defeats,
+- Every scene ends with a boss. Its chest weak point opens and closes; land
+  five hits on the glowing chest weak point or three headshots to defeat it.
+  Each scene takes 20 defeats,
   including the boss, and defeating the fifth scene's boss wins the game.
 - A headshot defeats a regular zombie in one hit. Regular torsos take three
   hits, and brutes take five; wounds appear as they take damage.
@@ -64,6 +65,9 @@ score.
 - Original, synthesized retro-style buzzer music plays once on the title and
   Game Over screens, with extended melodies and a separate celebratory melody
   after completing all five scenes. Reloading plays a short two-note sound.
+- Scene floors are drawn to match their locations: asphalt in the alley,
+  concrete at the station, wood in the ballroom and tavern, and grass in the
+  backyard. The alley and backyard have visible night skies.
 - Defeat 100 zombies to complete all five scenes and reach the victory
   screen, where a celebrating crowd gathers in front of the town hall under
   animated fireworks. Tap the screen to return to the title.
