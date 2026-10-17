@@ -16,7 +16,8 @@ constexpr uint8_t MAX_ZOMBIES = 5;
 constexpr uint8_t MAX_HIT_EFFECTS = 4;
 constexpr uint8_t MAX_CIVILIANS = 3;
 constexpr uint8_t KILLS_PER_WAVE = 10;
-constexpr uint8_t STARTING_LIVES = 3;
+constexpr uint8_t EASY_STARTING_LIVES = 10;
+constexpr uint8_t HARD_STARTING_LIVES = 5;
 constexpr uint8_t MAGAZINE_SIZE = 10;
 constexpr uint8_t LEVEL_COUNT = 5;
 constexpr uint8_t VOLUME_STEP = 10;
@@ -28,6 +29,11 @@ constexpr uint16_t LEVEL_TRANSITION_MS = 700;
 constexpr uint16_t TOUCH_SAMPLES = 8;
 constexpr uint16_t ZOMBIE_EMERGE_MS = 1800;
 constexpr uint16_t ZOMBIE_REACH_PLAYER_MS = 8500;
+constexpr uint16_t BOSS_REACH_PLAYER_MS = 18000;
+constexpr uint16_t BOSS_WEAKPOINT_CYCLE_MS = 2600;
+constexpr uint16_t BOSS_WEAKPOINT_OPEN_MS = 1300;
+constexpr uint16_t RUNNER_REACH_PLAYER_MS = 6200;
+constexpr uint16_t BRUTE_REACH_PLAYER_MS = 12500;
 constexpr uint16_t HIT_EFFECT_DURATION_MS = 420;
 constexpr uint16_t ENEMY_SHOT_TRAVEL_MS = 460;
 constexpr uint16_t ENEMY_SHOT_WARNING_MS = 360;
@@ -44,8 +50,18 @@ struct TouchCalibration {
   uint16_t yBottom;
 };
 
-enum class ZombieKind : uint8_t { Police, Suit, Dress };
+enum class ZombieKind : uint8_t {
+  Police,
+  Suit,
+  Dress,
+  Brute,
+  Runner,
+  Peeker,
+  Boss
+};
 enum class ZombieAnimation : uint8_t { Shamble, Lurch, Reach };
+enum class Difficulty : uint8_t { Easy, Hard };
+enum class WaveObjective : uint8_t { Headshots, Combo, Eliminations };
 
 struct Zombie {
   float x;
@@ -142,6 +158,16 @@ uint32_t nextCivilianAt = 0;
 uint32_t levelTransitionStartedAt = 0;
 uint32_t musicNextNoteAt = 0;
 uint32_t reloadFollowupAt = 0;
+uint32_t totalKills = 0;
+uint32_t shotsFired = 0;
+uint32_t zombieShotsHit = 0;
+uint32_t headshotCount = 0;
+uint32_t currentCombo = 0;
+uint32_t bestCombo = 0;
+uint32_t waveCombo = 0;
+uint32_t sceneKills = 0;
+uint8_t lastSceneReached = 1;
+uint8_t objectiveProgress = 0;
 uint32_t menuCatLastMovedAt = 0;
 uint32_t menuCatStateUntil = 0;
 uint32_t menuCarLastMovedAt = 0;
@@ -149,13 +175,14 @@ uint32_t menuCarNextPassAt = 0;
 float menuCatX = 26.0f;
 float menuCatTargetX = 160.0f;
 float menuCarX = -150.0f;
-uint8_t lives = STARTING_LIVES;
+uint8_t lives = EASY_STARTING_LIVES;
 uint8_t ammo = MAGAZINE_SIZE;
 uint8_t wave = 1;
 uint8_t waveKills = 0;
 uint8_t nextHitEffect = 0;
 uint8_t nextSceneryDamage = 0;
 uint8_t volume = 70;
+Difficulty difficulty = Difficulty::Easy;
 uint8_t sceneryDamageLevel = 0;
 uint16_t destroyedSceneProps = 0;
 uint8_t destroyedPropsLevel = UINT8_MAX;
@@ -165,6 +192,8 @@ uint8_t musicNoteIndex = 0;
 int8_t menuCatDirection = 1;
 bool menuCatWalking = true;
 bool menuCarPassing = false;
+bool objectiveCompleted = false;
+bool bossEncounterSpawned = false;
 bool touchWasDown = false;
 bool staticScreenDirty = true;
 bool speakerReady = false;
@@ -600,7 +629,101 @@ const char *levelName(uint8_t level) {
 }
 
 uint8_t currentLevel() {
-  return static_cast<uint8_t>((score / LEVEL_HIT_THRESHOLD) % LEVEL_COUNT);
+  return static_cast<uint8_t>((totalKills / LEVEL_HIT_THRESHOLD) % LEVEL_COUNT);
+}
+
+uint8_t startingLives() {
+  return difficulty == Difficulty::Hard ? HARD_STARTING_LIVES
+                                        : EASY_STARTING_LIVES;
+}
+
+uint8_t zombieTorsoHealth(ZombieKind kind) {
+  switch (kind) {
+    case ZombieKind::Brute:
+      return 5;
+    case ZombieKind::Boss:
+      return 6;
+    default:
+      return 3;
+  }
+}
+
+uint16_t zombieReachTime(ZombieKind kind) {
+  switch (kind) {
+    case ZombieKind::Runner:
+      return RUNNER_REACH_PLAYER_MS;
+    case ZombieKind::Brute:
+      return BRUTE_REACH_PLAYER_MS;
+    case ZombieKind::Boss:
+      return BOSS_REACH_PLAYER_MS;
+    default:
+      return ZOMBIE_REACH_PLAYER_MS;
+  }
+}
+
+WaveObjective currentObjective() {
+  return static_cast<WaveObjective>((wave - 1) % 3);
+}
+
+uint8_t objectiveTarget() {
+  switch (currentObjective()) {
+    case WaveObjective::Headshots:
+      return 3;
+    case WaveObjective::Combo:
+      return 4;
+    case WaveObjective::Eliminations:
+      return 8;
+  }
+  return 0;
+}
+
+const char *objectiveLabel() {
+  switch (currentObjective()) {
+    case WaveObjective::Headshots:
+      return "HEADSHOTS";
+    case WaveObjective::Combo:
+      return "COMBO";
+    case WaveObjective::Eliminations:
+      return "ELIMINATIONS";
+  }
+  return "";
+}
+
+void awardPoints(uint32_t points) {
+  score += points;
+  if (score > highScore) {
+    highScore = score;
+    preferences.putULong("highScore", highScore);
+  }
+}
+
+void updateWaveObjective(bool headshot) {
+  if (objectiveCompleted) {
+    return;
+  }
+  if (currentObjective() == WaveObjective::Headshots) {
+    if (headshot) {
+      ++objectiveProgress;
+    }
+  } else if (currentObjective() == WaveObjective::Combo) {
+    objectiveProgress = static_cast<uint8_t>(
+        min<uint32_t>(waveCombo, objectiveTarget()));
+  } else {
+    ++objectiveProgress;
+  }
+  if (objectiveProgress >= objectiveTarget()) {
+    objectiveCompleted = true;
+    awardPoints(100);
+    playTone(1480, 180);
+  }
+}
+
+void resetCombo() {
+  currentCombo = 0;
+  waveCombo = 0;
+  if (!objectiveCompleted && currentObjective() == WaveObjective::Combo) {
+    objectiveProgress = 0;
+  }
 }
 
 void drawPoliceStation(uint32_t now) {
@@ -1239,10 +1362,21 @@ void drawMenu(uint32_t now) {
   frameBuffer.setCursor(200, 137);
   frameBuffer.print("+");
 
-  frameBuffer.drawRoundRect(99, 173, 122, 39, 8, TFT_WHITE);
+  frameBuffer.fillRoundRect(99, 161, 122, 27, 6, 0x3186);
+  frameBuffer.drawRoundRect(99, 161, 122, 27, 6, TFT_WHITE);
+  frameBuffer.setTextColor(TFT_CYAN, 0x3186);
+  frameBuffer.setTextSize(1);
+  frameBuffer.setCursor(121, 164);
+  frameBuffer.print("TAP TO CHANGE");
+  frameBuffer.setCursor(121, 175);
+  frameBuffer.printf("%s - %u LIVES",
+                     difficulty == Difficulty::Easy ? "EASY" : "HARD",
+                     startingLives());
+
+  frameBuffer.drawRoundRect(99, 195, 122, 31, 8, TFT_WHITE);
   frameBuffer.setTextColor(TFT_ORANGE);
   frameBuffer.setTextSize(2);
-  frameBuffer.setCursor(133, 183);
+  frameBuffer.setCursor(133, 202);
   frameBuffer.print("START");
 
   drawMenuCat(now);
@@ -1251,10 +1385,28 @@ void drawMenu(uint32_t now) {
 
 void drawZombie(const Zombie &zombie, uint32_t now) {
   const uint32_t age = now - zombie.spawnedAt;
-  const int16_t radius = min<int16_t>(24, 9 + age / 420);
   const int16_t x = static_cast<int16_t>(zombie.x);
   const int16_t y = static_cast<int16_t>(zombie.y);
-  const uint16_t skin = zombie.lane == 1 ? 0x8D6A : zombieGreen;
+  if (zombie.kind == ZombieKind::Peeker && age < 850) {
+    const int16_t peekHeadY = zombie.entryY - 8;
+    frameBuffer.fillCircle(zombie.entryX, peekHeadY, 9, zombieGreen);
+    frameBuffer.fillCircle(zombie.entryX - 3, peekHeadY, 2, TFT_RED);
+    frameBuffer.fillCircle(zombie.entryX + 3, peekHeadY, 2, TFT_RED);
+    frameBuffer.drawFastHLine(zombie.entryX - 8, zombie.entryY + 5, 16,
+                              deskEdge);
+    return;
+  }
+  const int16_t radius = zombie.kind == ZombieKind::Boss
+                             ? min<int16_t>(32, 18 + age / 400)
+                         : zombie.kind == ZombieKind::Brute
+                             ? min<int16_t>(29, 13 + age / 380)
+                         : zombie.kind == ZombieKind::Runner
+                             ? min<int16_t>(21, 8 + age / 450)
+                             : min<int16_t>(24, 9 + age / 420);
+  const uint16_t skin = zombie.kind == ZombieKind::Boss ? 0xFBA0 :
+                        zombie.kind == ZombieKind::Brute ? 0x8A43 :
+                        zombie.kind == ZombieKind::Runner ? 0x7FE0 :
+                        zombie.lane == 1 ? 0x8D6A : zombieGreen;
   const uint32_t animationPhase =
       now / (zombie.animation == ZombieAnimation::Lurch ? 310 : 190) +
       zombie.lane;
@@ -1269,14 +1421,19 @@ void drawZombie(const Zombie &zombie, uint32_t now) {
   const int16_t headLean =
       zombie.animation == ZombieAnimation::Lurch && animationStep ? -2 : 0;
   const int16_t torsoTop = y - radius / 2 + bob;
-  const int16_t torsoWidth = max<int16_t>(12, radius);
+  const int16_t torsoWidth =
+      max<int16_t>(12, radius + (zombie.kind == ZombieKind::Boss ? 12 : 0));
   const int16_t headRadius = radius / 2 + 2;
   const bool isPolice = zombie.kind == ZombieKind::Police;
-  const uint16_t suitColor = zombie.lane == 1 ? 0x4208 : 0x3186;
+  const uint16_t suitColor = zombie.kind == ZombieKind::Boss ? 0x8000 :
+                             zombie.kind == ZombieKind::Brute ? 0x5A20 :
+                             zombie.lane == 1 ? 0x4208 : 0x3186;
   const uint16_t dressColor = zombie.lane == 1 ? 0xF81F : 0x8010;
-  const uint16_t outfitColor = isPolice ? uniformBlue :
+  const uint16_t outfitColor = zombie.kind == ZombieKind::Boss ? 0x8000 :
+                               isPolice ? uniformBlue :
                                zombie.kind == ZombieKind::Suit ? suitColor :
-                               dressColor;
+                               zombie.kind == ZombieKind::Dress ? dressColor :
+                               suitColor;
   const uint16_t pantsColor = isPolice ? uniformBlue : suitColor;
   const int16_t stride = animationStep ? -7 : 7;
   const int16_t armSwing = zombie.animation == ZombieAnimation::Lurch
@@ -1289,6 +1446,25 @@ void drawZombie(const Zombie &zombie, uint32_t now) {
                           radius / 3 + 2, zombieDark);
   frameBuffer.fillRoundRect(x - torsoWidth / 2, torsoTop, torsoWidth,
                             radius + 9, 5, outfitColor);
+  if (zombie.kind == ZombieKind::Boss) {
+    frameBuffer.drawRoundRect(x - torsoWidth / 2, torsoTop, torsoWidth,
+                              radius + 9, 5, badgeGold);
+    const bool weakPointOpen =
+        (age % BOSS_WEAKPOINT_CYCLE_MS) < BOSS_WEAKPOINT_OPEN_MS;
+    const uint16_t weakPointColor =
+        weakPointOpen ? TFT_YELLOW : 0x8000;
+    frameBuffer.fillCircle(x, y + 1, 9, weakPointColor);
+    frameBuffer.drawCircle(x, y + 1, 11, TFT_WHITE);
+    frameBuffer.fillCircle(x, y + 1, 4, weakPointOpen ? TFT_ORANGE : 0x4208);
+    frameBuffer.fillTriangle(x - 15, torsoTop + 3, x, torsoTop - 13,
+                             x + 15, torsoTop + 3, badgeGold);
+  } else if (zombie.kind == ZombieKind::Brute) {
+    frameBuffer.fillRect(x - 2, torsoTop + 5, 4, radius + 2, 0xD69A);
+    frameBuffer.fillCircle(x - torsoWidth / 2 + 3, torsoTop + 4, 3, 0x7BEF);
+    frameBuffer.fillCircle(x + torsoWidth / 2 - 3, torsoTop + 4, 3, 0x7BEF);
+  } else if (zombie.kind == ZombieKind::Runner) {
+    frameBuffer.drawFastVLine(x, torsoTop + 2, radius + 5, 0xFFE0);
+  }
   if (isPolice) {
     frameBuffer.fillRect(x - torsoWidth / 2 + 2, torsoTop + 2,
                          max<int16_t>(3, torsoWidth / 5), radius + 3,
@@ -1306,7 +1482,7 @@ void drawZombie(const Zombie &zombie, uint32_t now) {
                              torsoTop + 3, 0xFFFF);
     frameBuffer.fillTriangle(x - 2, torsoTop + 11, x + 2, torsoTop + 11,
                              x, torsoTop + 20, TFT_RED);
-  } else {
+  } else if (zombie.kind == ZombieKind::Dress) {
     frameBuffer.fillTriangle(x - torsoWidth / 2, torsoTop + radius / 3,
                              x + torsoWidth / 2, torsoTop + radius / 3,
                              x + torsoWidth / 2 + 2, torsoTop + radius + 9,
@@ -1353,7 +1529,7 @@ void drawZombie(const Zombie &zombie, uint32_t now) {
     frameBuffer.drawLine(woundX, torsoTop + 13, woundX + 4,
                          torsoTop + 18, woundRed);
   }
-  if (isPolice) {
+  if (isPolice || zombie.kind == ZombieKind::Boss) {
     frameBuffer.drawLine(x + torsoWidth / 2, torsoTop + 7,
                          x + torsoWidth / 2 + 8, torsoTop + 12, skin);
     frameBuffer.fillRect(x + torsoWidth / 2 + 6, torsoTop + 9, 9, 4,
@@ -1362,8 +1538,9 @@ void drawZombie(const Zombie &zombie, uint32_t now) {
                          deskEdge);
   }
 
+  const bool usesGun = isPolice || zombie.kind == ZombieKind::Boss;
   const int32_t shotWarning = static_cast<int32_t>(zombie.nextShotAt - now);
-  if (isPolice && shotWarning > 0 &&
+  if (usesGun && shotWarning > 0 &&
       shotWarning <= ENEMY_SHOT_WARNING_MS) {
     frameBuffer.setTextColor(TFT_RED);
     frameBuffer.setTextSize(2);
@@ -1419,6 +1596,22 @@ void drawZombie(const Zombie &zombie, uint32_t now) {
   }
   frameBuffer.drawFastHLine(x - radius / 3, y - radius / 2,
                             max<int16_t>(3, radius * 2 / 3), woundRed);
+  if (zombie.kind == ZombieKind::Boss) {
+    const int16_t barWidth = 40;
+    const int16_t barX = x - barWidth / 2;
+    const int16_t barY = y + radius + 11;
+    frameBuffer.fillRect(barX, barY, barWidth, 5, wallShadow);
+    frameBuffer.fillRect(barX, barY,
+                         barWidth * (zombieTorsoHealth(zombie.kind) -
+                                     zombie.torsoHits) /
+                             zombieTorsoHealth(zombie.kind),
+                         5, TFT_RED);
+    frameBuffer.drawRect(barX, barY, barWidth, 5, TFT_WHITE);
+    frameBuffer.setTextColor(TFT_YELLOW);
+    frameBuffer.setTextSize(1);
+    frameBuffer.setCursor(x - 12, barY - 10);
+    frameBuffer.print("BOSS");
+  }
 }
 
 void updateCivilians(uint32_t now) {
@@ -1547,10 +1740,22 @@ void drawHud() {
   frameBuffer.setTextSize(1);
   frameBuffer.setCursor(8, 9);
   frameBuffer.printf("SCORE %lu", static_cast<unsigned long>(score));
-  frameBuffer.setCursor(130, 9);
+  frameBuffer.setCursor(140, 9);
   frameBuffer.printf("WAVE %u", wave);
-  frameBuffer.setCursor(frameBuffer.width() - 72, 9);
-  frameBuffer.printf("LIVES %u", lives);
+  frameBuffer.setCursor(215, 9);
+  frameBuffer.printf("C%lu", static_cast<unsigned long>(
+                                 min<uint32_t>(currentCombo, 999)));
+  frameBuffer.setCursor(frameBuffer.width() - 31, 9);
+  frameBuffer.printf("L%u", lives);
+  frameBuffer.fillRect(0, 25, frameBuffer.width(), 14, 0x2104);
+  frameBuffer.setTextColor(objectiveCompleted ? TFT_GREEN : TFT_CYAN, 0x2104);
+  frameBuffer.setCursor(8, 29);
+  if (objectiveCompleted) {
+    frameBuffer.printf("OBJECTIVE COMPLETE  +100");
+  } else {
+    frameBuffer.printf("OBJECTIVE %s %u/%u", objectiveLabel(),
+                       objectiveProgress, objectiveTarget());
+  }
 }
 
 void drawPlayerDamage(uint32_t now) {
@@ -1729,6 +1934,8 @@ void drawCelebratingZombie(uint32_t now) {
 void drawGameOver(uint32_t now) {
   const int16_t width = display.width();
   const int16_t height = display.height();
+  const uint32_t accuracy =
+      shotsFired == 0 ? 0 : min<uint32_t>(100, zombieShotsHit * 100 / shotsFired);
   frameBuffer.fillSprite(0x0841);
   for (int16_t y = 0; y < height; y += 12) {
     frameBuffer.drawFastHLine(0, y, width, (y / 12) % 2 == 0 ? 0x1082 : 0x0861);
@@ -1740,18 +1947,29 @@ void drawGameOver(uint32_t now) {
   drawCelebratingZombie(now);
   frameBuffer.setTextColor(TFT_RED);
   frameBuffer.setTextSize(2);
-  frameBuffer.setCursor(19, 54);
+  frameBuffer.setCursor(19, 48);
   frameBuffer.print("GAME OVER");
   frameBuffer.setTextColor(TFT_WHITE);
   frameBuffer.setTextSize(1);
-  frameBuffer.setCursor(20, 101);
+  frameBuffer.setCursor(20, 78);
   frameBuffer.printf("SCORE %lu", static_cast<unsigned long>(score));
-  frameBuffer.setCursor(20, 126);
+  frameBuffer.setCursor(20, 95);
+  frameBuffer.printf("KILLS %lu", static_cast<unsigned long>(totalKills));
+  frameBuffer.setCursor(20, 112);
+  frameBuffer.printf("HEADSHOTS %lu", static_cast<unsigned long>(headshotCount));
+  frameBuffer.setCursor(20, 129);
+  frameBuffer.printf("BEST COMBO %lu", static_cast<unsigned long>(bestCombo));
+  frameBuffer.setCursor(20, 146);
+  frameBuffer.printf("ACCURACY %lu%%", static_cast<unsigned long>(accuracy));
+  frameBuffer.setCursor(20, 163);
+  frameBuffer.printf("SCENE %u: %s", lastSceneReached,
+                     levelName(lastSceneReached - 1));
+  frameBuffer.setCursor(20, 180);
   frameBuffer.printf("BEST %lu", static_cast<unsigned long>(highScore));
-  frameBuffer.fillRoundRect(17, 180, 159, 42, 8, TFT_DARKGREEN);
-  frameBuffer.drawRoundRect(17, 180, 159, 42, 8, TFT_WHITE);
+  frameBuffer.fillRoundRect(17, 198, 193, 29, 8, TFT_DARKGREEN);
+  frameBuffer.drawRoundRect(17, 198, 193, 29, 8, TFT_WHITE);
   frameBuffer.setTextColor(TFT_WHITE, TFT_DARKGREEN);
-  frameBuffer.setCursor(27, 192);
+  frameBuffer.setCursor(76, 209);
   frameBuffer.print("PLAY AGAIN");
   frameBuffer.pushSprite(0, 0);
 }
@@ -1834,10 +2052,21 @@ void drawVictory(uint32_t now) {
 void startGame() {
   startMusic(MusicTrack::None, millis());
   score = 0;
-  lives = STARTING_LIVES;
+  lives = startingLives();
   ammo = MAGAZINE_SIZE;
   wave = 1;
   waveKills = 0;
+  totalKills = 0;
+  sceneKills = 0;
+  shotsFired = 0;
+  zombieShotsHit = 0;
+  headshotCount = 0;
+  resetCombo();
+  bestCombo = 0;
+  lastSceneReached = 1;
+  objectiveProgress = 0;
+  objectiveCompleted = false;
+  bossEncounterSpawned = false;
   const uint32_t now = millis();
   for (Zombie &zombie : zombies) {
     zombie.active = false;
@@ -1866,16 +2095,19 @@ void startGame() {
   screen = Screen::Playing;
 }
 
-void chooseZombieEntry(uint8_t level, int16_t &x, int16_t &y) {
+void chooseZombieEntry(uint8_t level, int16_t &x, int16_t &y,
+                       bool windowOnly = false) {
   uint8_t entryCount = 0;
   for (const SceneProp &prop : SCENE_PROPS) {
     if (prop.scene == level && prop.type == PropType::Window) {
       ++entryCount;
     }
   }
-  for (const SceneDoor &door : SCENE_DOORS) {
-    if (door.scene == level) {
-      ++entryCount;
+  if (!windowOnly) {
+    for (const SceneDoor &door : SCENE_DOORS) {
+      if (door.scene == level) {
+        ++entryCount;
+      }
     }
   }
 
@@ -1890,14 +2122,16 @@ void chooseZombieEntry(uint8_t level, int16_t &x, int16_t &y) {
       return;
     }
   }
-  for (const SceneDoor &door : SCENE_DOORS) {
-    if (door.scene != level) {
-      continue;
-    }
-    if (selected-- == 0) {
-      x = door.x + door.width / 2;
-      y = door.y + door.height;
-      return;
+  if (!windowOnly) {
+    for (const SceneDoor &door : SCENE_DOORS) {
+      if (door.scene != level) {
+        continue;
+      }
+      if (selected-- == 0) {
+        x = door.x + door.width / 2;
+        y = door.y + door.height;
+        return;
+      }
     }
   }
   x = frameBuffer.width() / 2;
@@ -1910,18 +2144,56 @@ void spawnZombie(uint32_t now) {
       continue;
     }
     zombie.lane = random(0, 3);
+    const uint8_t roll = random(0, 12);
+    if (difficulty == Difficulty::Hard) {
+      zombie.kind = roll < 8 ? ZombieKind::Police :
+                    roll == 8 ? ZombieKind::Suit :
+                    roll == 9 ? ZombieKind::Dress :
+                    roll == 10 ? ZombieKind::Brute : ZombieKind::Runner;
+    } else {
+      zombie.kind = roll < 4 ? ZombieKind::Police :
+                    roll < 6 ? ZombieKind::Suit :
+                    roll < 8 ? ZombieKind::Dress :
+                    roll == 8 ? ZombieKind::Brute :
+                    roll == 9 ? ZombieKind::Runner : ZombieKind::Peeker;
+    }
+    chooseZombieEntry(currentLevel(), zombie.entryX, zombie.entryY,
+                      zombie.kind == ZombieKind::Peeker);
+    zombie.x = zombie.entryX;
+    zombie.y = zombie.entryY;
+    zombie.spawnedAt = now;
+    zombie.animation = static_cast<ZombieAnimation>(random(0, 3));
+    zombie.nextShotAt =
+        zombie.kind == ZombieKind::Police
+            ? now + (difficulty == Difficulty::Hard
+                         ? 1000
+                         : ZOMBIE_EMERGE_MS + random(650, 1801))
+            : UINT32_MAX;
+    zombie.torsoHits = 0;
+    zombie.hasHat = zombie.kind == ZombieKind::Police;
+    zombie.active = true;
+    return;
+  }
+}
+
+void spawnBoss(uint32_t now) {
+  for (Zombie &zombie : zombies) {
+    if (zombie.active) {
+      continue;
+    }
+    zombie.lane = 1;
     chooseZombieEntry(currentLevel(), zombie.entryX, zombie.entryY);
     zombie.x = zombie.entryX;
     zombie.y = zombie.entryY;
     zombie.spawnedAt = now;
-    zombie.kind = static_cast<ZombieKind>(random(0, 3));
-    zombie.animation = static_cast<ZombieAnimation>(random(0, 3));
-    zombie.nextShotAt = zombie.kind == ZombieKind::Police
-                            ? now + ZOMBIE_EMERGE_MS + random(650, 1801)
-                            : UINT32_MAX;
+    zombie.nextShotAt = now + 2200;
     zombie.torsoHits = 0;
-    zombie.hasHat = zombie.kind == ZombieKind::Police;
+    zombie.animation = ZombieAnimation::Reach;
+    zombie.kind = ZombieKind::Boss;
+    zombie.hasHat = false;
     zombie.active = true;
+    bossEncounterSpawned = true;
+    playTone(220, 280);
     return;
   }
 }
@@ -1951,6 +2223,7 @@ void updateZombies(uint32_t now) {
     if (lives > 0) {
       --lives;
     }
+    resetCombo();
     playerHitUntil = now + 320;
     playTone(240, 180);
     if (lives == 0) {
@@ -1961,7 +2234,11 @@ void updateZombies(uint32_t now) {
 
   const uint32_t spawnInterval =
       max<uint32_t>(850, 1900U - min<uint32_t>(wave * 70U, 850U));
-  if (now >= nextSpawnAt) {
+  if (sceneKills == LEVEL_HIT_THRESHOLD - 1) {
+    if (!bossEncounterSpawned) {
+      spawnBoss(now);
+    }
+  } else if (now >= nextSpawnAt) {
     spawnZombie(now);
     nextSpawnAt = now + spawnInterval;
   }
@@ -1971,15 +2248,19 @@ void updateZombies(uint32_t now) {
       continue;
     }
     const uint32_t age = now - zombie.spawnedAt;
+    const uint16_t reachTime = zombieReachTime(zombie.kind);
     const uint32_t approachAge =
         age > ZOMBIE_EMERGE_MS ? age - ZOMBIE_EMERGE_MS : 0;
     const float emergeProgress =
         min<uint32_t>(age, ZOMBIE_EMERGE_MS) /
         static_cast<float>(ZOMBIE_EMERGE_MS);
     const float approachProgress =
-        min<uint32_t>(approachAge, ZOMBIE_REACH_PLAYER_MS - ZOMBIE_EMERGE_MS) /
-        static_cast<float>(ZOMBIE_REACH_PLAYER_MS - ZOMBIE_EMERGE_MS);
-    if (age < ZOMBIE_EMERGE_MS) {
+        min<uint32_t>(approachAge, reachTime - ZOMBIE_EMERGE_MS) /
+        static_cast<float>(reachTime - ZOMBIE_EMERGE_MS);
+    if (zombie.kind == ZombieKind::Peeker && age < 850) {
+      zombie.x = zombie.entryX;
+      zombie.y = zombie.entryY;
+    } else if (age < ZOMBIE_EMERGE_MS) {
       zombie.x = zombie.entryX +
                  (POLICE_LANE_X[zombie.lane] - zombie.entryX) *
                      emergeProgress;
@@ -1991,7 +2272,8 @@ void updateZombies(uint32_t now) {
                            (1.0f - laneConvergence);
     }
 
-    if (zombie.kind == ZombieKind::Police &&
+    if ((zombie.kind == ZombieKind::Police ||
+         zombie.kind == ZombieKind::Boss) &&
         static_cast<int32_t>(now - zombie.nextShotAt) >= 0) {
       bool shotQueued = false;
       for (EnemyShot &shot : enemyShots) {
@@ -2007,16 +2289,22 @@ void updateZombies(uint32_t now) {
         Serial.println("ERROR: No slot available for enemy shot.");
         continue;
       }
-      zombie.nextShotAt = now + random(1000, 3001);
+      zombie.nextShotAt =
+          now + (zombie.kind == ZombieKind::Boss ? random(1800, 3201)
+                                                  : random(1000, 3001));
       playTone(680, 65);
     }
 
-    if (age >= ZOMBIE_REACH_PLAYER_MS) {
+    if (age >= reachTime) {
       zombie.active = false;
+      if (zombie.kind == ZombieKind::Boss) {
+        bossEncounterSpawned = false;
+      }
       if (lives > 0) {
         --lives;
         playTone(270, 120);
       }
+      resetCombo();
       if (lives == 0) {
         endGame();
         return;
@@ -2030,6 +2318,7 @@ void shootAt(int16_t x, int16_t y) {
     return;
   }
   --ammo;
+  ++shotsFired;
   playTone(1120, 35);
   for (Civilian &civilian : civilians) {
     if (!civilian.active) {
@@ -2050,6 +2339,7 @@ void shootAt(int16_t x, int16_t y) {
     if (lives > 0) {
       --lives;
     }
+    resetCombo();
     playerHitUntil = millis() + 420;
     addHitEffect(static_cast<int16_t>(civilian.x),
                  static_cast<int16_t>(civilian.y), false, millis());
@@ -2065,7 +2355,13 @@ void shootAt(int16_t x, int16_t y) {
       continue;
     }
     const uint32_t age = millis() - zombie.spawnedAt;
-    const int16_t radius = min<int16_t>(24, 9 + age / 420);
+    const int16_t radius = zombie.kind == ZombieKind::Boss
+                               ? min<int16_t>(32, 18 + age / 400)
+                           : zombie.kind == ZombieKind::Brute
+                               ? min<int16_t>(29, 13 + age / 380)
+                           : zombie.kind == ZombieKind::Runner
+                               ? min<int16_t>(21, 8 + age / 450)
+                               : min<int16_t>(24, 9 + age / 420);
     const int16_t dx = x - static_cast<int16_t>(zombie.x);
     const int16_t dy = y - static_cast<int16_t>(zombie.y);
     const int16_t headY = static_cast<int16_t>(zombie.y) - radius;
@@ -2085,6 +2381,26 @@ void shootAt(int16_t x, int16_t y) {
       continue;
     }
 
+    if (zombie.kind == ZombieKind::Boss) {
+      const bool weakPointOpen =
+          (age % BOSS_WEAKPOINT_CYCLE_MS) < BOSS_WEAKPOINT_OPEN_MS;
+      const int16_t weakDx = x - static_cast<int16_t>(zombie.x);
+      const int16_t weakDy = y - (static_cast<int16_t>(zombie.y) + 1);
+      if (!weakPointOpen || weakDx * weakDx + weakDy * weakDy > 11 * 11) {
+        resetCombo();
+        playTone(260, 70);
+        return;
+      }
+      ++zombie.torsoHits;
+      ++zombieShotsHit;
+      addHitEffect(static_cast<int16_t>(zombie.x),
+                   static_cast<int16_t>(zombie.y), false, millis());
+      if (zombie.torsoHits < zombieTorsoHealth(zombie.kind)) {
+        playTone(840, 75);
+        return;
+      }
+    }
+
     const int16_t headDx = x - static_cast<int16_t>(zombie.x);
     const int16_t headDy = y - headY;
     const int16_t headshotRadius = radius / 2 + 7;
@@ -2092,33 +2408,63 @@ void shootAt(int16_t x, int16_t y) {
         headDx * headDx + headDy * headDy <= headshotRadius * headshotRadius;
     const int16_t impactX = static_cast<int16_t>(zombie.x);
     const int16_t impactY = headshot ? headY : static_cast<int16_t>(zombie.y);
-    if (!headshot) {
+    if (zombie.kind != ZombieKind::Boss && !headshot) {
       ++zombie.torsoHits;
+      ++zombieShotsHit;
       addHitEffect(impactX, impactY, false, millis());
-      if (zombie.torsoHits < 3) {
+      if (zombie.torsoHits < zombieTorsoHealth(zombie.kind)) {
         playTone(470, 85);
         return;
       }
+    } else if (zombie.kind != ZombieKind::Boss) {
+      ++zombieShotsHit;
     }
 
-    addHitEffect(impactX, impactY, headshot, millis());
+    if (headshot && zombie.kind != ZombieKind::Boss) {
+      ++headshotCount;
+    }
+
+    addHitEffect(impactX, impactY,
+                 headshot && zombie.kind != ZombieKind::Boss, millis());
     playTone(headshot ? 1680 : 470, headshot ? 115 : 85);
     zombie.active = false;
-    ++score;
+    ++totalKills;
+    ++sceneKills;
     ++waveKills;
+    lastSceneReached = min<uint32_t>(
+        LEVEL_COUNT, totalKills / LEVEL_HIT_THRESHOLD + 1);
+    ++currentCombo;
+    ++waveCombo;
+    bestCombo = max<uint32_t>(bestCombo, currentCombo);
+    awardPoints(100 + (headshot && zombie.kind != ZombieKind::Boss ? 50 : 0) +
+                min<uint32_t>(currentCombo > 1 ? (currentCombo - 1) * 10 : 0,
+                              100));
+    updateWaveObjective(headshot && zombie.kind != ZombieKind::Boss);
     if (waveKills >= KILLS_PER_WAVE) {
       if (wave < UINT8_MAX) {
         ++wave;
       }
       waveKills = 0;
+      waveCombo = 0;
+      objectiveProgress = 0;
+      objectiveCompleted = false;
     }
-    if (score > highScore) {
-      highScore = score;
-      preferences.putULong("highScore", highScore);
-    }
-    if (score >= LEVEL_COUNT * LEVEL_HIT_THRESHOLD) {
+    if (totalKills >= LEVEL_COUNT * LEVEL_HIT_THRESHOLD) {
       endVictory();
       return;
+    }
+    if (sceneKills >= LEVEL_HIT_THRESHOLD) {
+      sceneKills = 0;
+      bossEncounterSpawned = false;
+      lastSceneReached =
+          max<uint8_t>(lastSceneReached, currentLevel() + 1);
+      for (Zombie &remaining : zombies) {
+        remaining.active = false;
+      }
+      for (EnemyShot &shot : enemyShots) {
+        shot.active = false;
+      }
+      nextSpawnAt = millis() + 700;
     }
     const uint8_t newLevel = currentLevel();
     if (newLevel != displayedLevel) {
@@ -2130,6 +2476,7 @@ void shootAt(int16_t x, int16_t y) {
     return;
   }
 
+  resetCombo();
   if (!damageSceneProp(currentLevel(), x, y)) {
     addSceneryDamage(x, y);
     playTone(760, 25);
@@ -2157,7 +2504,13 @@ void handleTouch() {
         applySpeakerVolume();
         playTone(988, 55);
         staticScreenDirty = true;
-      } else if (x >= 99 && x <= 221 && y >= 173 && y <= 212) {
+      } else if (x >= 99 && x <= 221 && y >= 161 && y <= 188) {
+        difficulty = difficulty == Difficulty::Easy ? Difficulty::Hard
+                                                      : Difficulty::Easy;
+        preferences.putUChar("difficulty",
+                             static_cast<uint8_t>(difficulty));
+        staticScreenDirty = true;
+      } else if (x >= 99 && x <= 221 && y >= 195 && y <= 226) {
         startGame();
       }
     } else if (screen == Screen::Playing) {
@@ -2168,10 +2521,8 @@ void handleTouch() {
         shootAt(x, y);
       }
     } else if (screen == Screen::GameOver &&
-               x >= 17 && x <= 176 && y >= 180 && y <= 222) {
-      screen = Screen::Menu;
-      startMusic(MusicTrack::Menu, millis());
-      staticScreenDirty = true;
+               x >= 17 && x <= 210 && y >= 187 && y <= 228) {
+      startGame();
     } else if (screen == Screen::Victory) {
       screen = Screen::Menu;
       startMusic(MusicTrack::Menu, millis());
@@ -2213,6 +2564,10 @@ void setup() {
   preferences.begin("cyd-death", false);
   highScore = preferences.getULong("highScore", 0);
   volume = min<uint8_t>(100, preferences.getUChar("volume", 70));
+  difficulty = preferences.getUChar("difficulty", 0) ==
+                       static_cast<uint8_t>(Difficulty::Hard)
+                   ? Difficulty::Hard
+                   : Difficulty::Easy;
   if (ledcSetup(BUZZER_CHANNEL, 2000, 10) == 0) {
     Serial.println("ERROR: Buzzer PWM initialization failed.");
   } else {

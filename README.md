@@ -6,6 +6,8 @@ police station, ballroom, backyard, and tavern—and approach in three lanes.
 Tap them on the screen to shoot, protect the bystanders, and build your high
 score.
 
+![CYD of the Dead running on the CYD display](./CYD_of_the_dead.png)
+
 ## How to play
 
 - The title screen features an animated, armed police officer on the left and
@@ -16,14 +18,23 @@ score.
   a random 1.8–7 second pause before choosing its next direction.
 - Tap **Start** on the title screen.
 - Zombies emerge through scene windows and doors before advancing toward you.
-  Police officers and civilians in suits or dresses can appear; only officers
-  telegraph and shoot, and each bullet that lands costs one life. Stop every
-  zombie before it reaches you.
+  They include police officers and undead in suits or dresses; police zombies
+  and scene bosses telegraph and shoot, and each bullet that lands costs one
+  life. Stop every zombie before it reaches you.
 - Up to five zombies can appear at once. Each zombie is randomly assigned one
   of three distinct shambling, lurching, or reaching animations. Up to three
   peaceful civilians or animals can be on screen at once.
-- A headshot defeats an officer in one hit. The torso takes three hits; wounds
-  appear as it takes damage.
+- Choose Easy (10 lives) or Hard (5 lives) in the title menu. Hard mode doubles
+  the police-zombie share of spawns, and officers can shoot after one second.
+- Brutes take five body hits and move slowly; runners move quickly, while
+  peekers briefly watch from windows before moving into a lane.
+- Every scene ends with a boss. Its chest weak point opens and closes; hit the
+  glowing weak point six times to defeat it. Each scene takes 20 defeats,
+  including the boss, and defeating the fifth scene's boss wins the game.
+- A headshot defeats a regular zombie in one hit. Regular torsos take three
+  hits, and brutes take five; wounds appear as they take damage.
+- Consecutive defeats build a combo for extra points. Headshots also earn bonus
+  points, while a miss or a civilian hit breaks the combo.
 - The player has a ten-round magazine. Every shot uses one round, including
   missed shots. Remaining cartridges are shown at the lower left; tap
   **RELOAD** at the lower right to refill the magazine. Reloading does not
@@ -34,23 +45,26 @@ score.
 - Background props—including windows, monitors, bottles, bins, and a
   chandelier—break visibly when hit. Broken props remain damaged for the
   current scene, and scenery hits never add points.
-- Every 20 defeated zombies advances to the next scene. The five
-  scenes repeat after the tavern, with a short animated scene transition.
+- Every 20 defeated zombies advances to the next scene with a short animated
+  transition. Defeat the boss in each of the five scenes to win.
 - Dogs, cats, men, women, and children may cross the scene. Shooting a
   bystander costs one life and does not award points.
 - Original buzzer tones accompany shots, hits, and lost lives. Headshots and
   torso hits have different impact tones and animated bursts.
 - Every ten zombies defeated advances the wave; later waves spawn zombies
-  more frequently.
+  more frequently and rotate between headshot, combo, and elimination
+  objectives. Completing an objective awards bonus points.
 - Adjust buzzer volume in the title menu with **−** and **+**; the setting is
   saved on the CYD, and each adjustment plays an audible preview.
-- You have three lives. Each zombie that reaches the foreground costs one.
+- Each zombie that reaches the foreground costs one life. Game Over shows the
+  run's score, defeats, headshots, best combo, hit accuracy, and furthest scene;
+  tap **PLAY AGAIN** to immediately restart with the selected difficulty.
 - Your high score is saved in the CYD's non-volatile preferences as soon as a
   new record is reached.
 - Original, synthesized retro-style buzzer music plays once on the title and
   Game Over screens, with extended melodies and a separate celebratory melody
   after completing all five scenes. Reloading plays a short two-note sound.
-- Defeat 100 zombie officers to complete all five scenes and reach the victory
+- Defeat 100 zombies to complete all five scenes and reach the victory
   screen, where a celebrating crowd gathers in front of the town hall under
   animated fireworks. Tap the screen to return to the title.
 - The Game Over screen features a celebrating zombie officer animated on the
